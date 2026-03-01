@@ -1,7 +1,5 @@
 # wtp - WorkTree for Polyrepo
 
-> **Note:** Error messages are displayed in **red** for better visibility using `anstyle`.
-
 [![Rust](https://img.shields.io/badge/rust-2024-orange.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/index.html)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -31,12 +29,6 @@ cd wtp
 cargo install --path .
 ```
 
-Or directly from crates.io (when published):
-
-```bash
-cargo install wtp
-```
-
 ## Quick Start
 
 ```bash
@@ -52,15 +44,14 @@ wtp switch feature-x
 cd ~/projects/another-repo
 wtp switch feature-x
 
+# Jump to workspace directory (requires shell integration, see below)
+wtp cd feature-x
+
 # Or import an external repo into the current workspace
-cd ~/.wtp/workspaces/feature-x
 wtp import ~/projects/another-repo
 
 # See all worktrees in the workspace
-wtp status --workspace feature-x
-
-# Jump to workspace directory (requires shell integration, see below)
-wtp cd feature-x
+wtp status
 ```
 
 ## Configuration
