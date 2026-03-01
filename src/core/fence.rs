@@ -37,28 +37,23 @@ impl Fence {
 
     /// Check if a path is within the boundary
     pub fn is_within_boundary(&self, path: &Path) -> bool {
-        // For existing paths, canonicalize both for accurate comparison
-        // For non-existing paths, do a simple prefix check
-        
-        let boundary_str = self.boundary.to_string_lossy();
-        let path_str = path.to_string_lossy();
-        
-        // Simple prefix check first (handles most cases)
-        if path_str.starts_with(boundary_str.as_ref()) {
-            return true;
-        }
-        
-        // Try canonical comparison for existing paths
-        // (handles symlinks like /tmp -> /private/tmp on macOS)
+        let canonical_boundary = match self.boundary.canonicalize() {
+            Ok(path) => path,
+            Err(_) => self.boundary.clone(),
+        };
+
         if let Ok(canonical_path) = path.canonicalize() {
-            if let Ok(canonical_boundary) = self.boundary.canonicalize() {
-                let canonical_path_str = canonical_path.to_string_lossy();
-                let canonical_boundary_str = canonical_boundary.to_string_lossy();
-                return canonical_path_str.starts_with(canonical_boundary_str.as_ref());
-            }
+            return canonical_path == canonical_boundary
+                || canonical_path.starts_with(&canonical_boundary);
         }
-        
-        false
+
+        let candidate = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            canonical_boundary.join(path)
+        };
+
+        candidate == canonical_boundary || candidate.starts_with(&canonical_boundary)
     }
 
     /// Check path and prompt if outside boundary
@@ -175,6 +170,21 @@ mod tests {
 
         let outside = PathBuf::from("/etc/passwd");
         assert!(!fence.is_within_boundary(&outside));
+    }
+
+    #[test]
+    fn test_prefix_path_bypass_prevented() {
+        let temp = tempfile::tempdir().unwrap();
+        let boundary = temp.path().join("ws");
+        std::fs::create_dir_all(&boundary).unwrap();
+
+        let fence = Fence::new(boundary.clone()).non_interactive();
+
+        let outside_with_same_prefix = temp.path().join("ws_evil").join("file.txt");
+        assert!(!fence.is_within_boundary(&outside_with_same_prefix));
+
+        let inside = boundary.join("repo").join("file.txt");
+        assert!(fence.is_within_boundary(&inside));
     }
 
     #[test]
