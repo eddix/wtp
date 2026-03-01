@@ -95,7 +95,6 @@ Commands are grouped visually in help output but kept flat (not nested).
 pub struct GlobalConfig {
     pub workspace_root: PathBuf,           // default: ~/.wtp/workspaces
     pub workspaces: IndexMap<String, PathBuf>, // name -> path mapping
-    pub default_workspace: Option<String>, // NOT currently used
     pub hosts: HashMap<String, HostConfig>,
     pub default_host: Option<String>,
     pub hooks: HooksConfig,                // on_create hook path
@@ -302,4 +301,4 @@ cargo test
 - TUI mode was removed (ratatui dependency remains but unused)
 - Error messages are displayed in red
 - All commands use green color for command names in help output
-- `default_workspace` config field exists but is NOT currently used by any command
+

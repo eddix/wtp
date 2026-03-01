@@ -28,10 +28,6 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub workspaces: IndexMap<String, PathBuf>,
 
-    /// Default workspace to use when not specified
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_workspace: Option<String>,
-
     /// Host aliases mapping host name to root directory
     #[serde(default)]
     pub hosts: HashMap<String, HostConfig>,
@@ -73,7 +69,6 @@ impl Default for GlobalConfig {
         Self {
             workspace_root: default_workspace_root(),
             workspaces: IndexMap::new(),
-            default_workspace: None,
             hosts: HashMap::new(),
             default_host: None,
             hooks: HooksConfig::default(),
@@ -208,11 +203,6 @@ impl GlobalConfig {
             self.save()?;
         }
         Ok(path)
-    }
-
-    /// Get the default workspace name
-    pub fn default_workspace_name(&self) -> Option<&str> {
-        self.default_workspace.as_deref()
     }
 
     /// Get host root by alias

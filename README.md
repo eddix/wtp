@@ -71,7 +71,6 @@ If multiple config files exist, a warning is displayed showing which file is bei
 ```toml
 # Workspace settings
 workspace_root = "~/.wtp/workspaces"  # Default location for all workspaces
-default_workspace = "main"             # Optional default workspace
 
 # Host aliases - map short names to code roots
 [hosts.gh]
