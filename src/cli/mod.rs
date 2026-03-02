@@ -10,54 +10,25 @@ pub mod shell_init;
 pub mod status;
 pub mod switch;
 
-use clap::builder::{Styles, styling::AnsiColor};
-use clap::{Parser, Subcommand};
+use clap::{Command, CommandFactory, Parser, Subcommand};
+use colored::Colorize;
+use wtp_derive::GroupedSubcommand;
 
-/// Custom styles for help text
-fn help_styles() -> Styles {
-    Styles::styled()
-        // Headers (Commands, Options, etc.) - yellow
-        .header(AnsiColor::Yellow.on_default().bold())
-        // Literal command-line syntax (commands, flags like --help) - yellow
-        .literal(AnsiColor::Yellow.on_default())
-        // Placeholders (value names like <NAME>) - purple/magenta
-        .placeholder(AnsiColor::Magenta.on_default())
-        // Usage heading - green
-        .usage(AnsiColor::Green.on_default().bold())
-        // Valid/suggested values - blue
-        .valid(AnsiColor::Blue.on_default())
-        // Error messages - red
-        .error(AnsiColor::Red.on_default().bold())
+/// Print custom help message with grouped subcommands
+fn print_help() {
+    let version = env!("CARGO_PKG_VERSION");
+    let app_name = "wtp";
+    let about = "WorkTree for Polyrepo - Manage git worktrees across multiple repositories";
+    
+    Commands::print_help(app_name, version, about);
 }
 
 /// WorkTree for Polyrepo - Manage multiple git worktrees across repositories
 #[derive(Parser, Debug)]
 #[command(name = "wtp")]
-#[command(about = "WorkTree for Polyrepo - Manage git worktrees across multiple repositories")]
+#[command(disable_help_flag = true, disable_help_subcommand = true)]
 #[command(version)]
-#[command(styles = help_styles())]
 #[command(color = clap::ColorChoice::Always)]
-#[command(
-    help_template = concat!(
-        "{about}\n\n",
-        "{usage-heading} {usage}\n\n",
-        "Options:\n",
-        "{options}\n\n",
-        "Workspace Management:\n",
-        "  \x1b[32mcd\x1b[0m          Change to a workspace directory (requires shell integration)\n",
-        "  \x1b[32mcreate\x1b[0m      Create a new workspace\n",
-        "  \x1b[32mls\x1b[0m          List all workspaces\n",
-        "  \x1b[32mrm\x1b[0m          Remove a workspace\n",
-        "  \x1b[32mstatus\x1b[0m      Show status of a workspace\n\n",
-        "Repository Operations:\n",
-        "  \x1b[32mimport\x1b[0m      Import a repository's worktree into a workspace\n",
-        "  \x1b[32mswitch\x1b[0m      Switch current repo to a workspace\n\n",
-        "Utilities:\n",
-        "  \x1b[32mhost\x1b[0m        Manage host aliases\n",
-        "  \x1b[32mshell-init\x1b[0m  Generate shell integration script\n\n",
-        "Use `{name} help <command>` for more information on a specific command.\n"
-    )
-)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -67,23 +38,79 @@ pub struct Cli {
     pub verbose: bool,
 }
 
-#[derive(Subcommand, Debug)]
-#[command(hide = true)]
+#[derive(GroupedSubcommand, Subcommand, Debug)]
 pub enum Commands {
+    /// Change to a workspace directory (requires shell integration)
+    #[cmd_group("Workspace Management")]
     Cd(cd::CdArgs),
+    /// Create a new workspace
+    #[cmd_group("Workspace Management")]
     Create(create::CreateArgs),
+    /// List all workspaces
+    #[cmd_group("Workspace Management")]
     Ls(ls::LsArgs),
+    /// Remove a workspace
+    #[cmd_group("Workspace Management")]
     Remove(remove::RemoveArgs),
+    /// Show status of a workspace
+    #[cmd_group("Workspace Management")]
     Status(status::StatusArgs),
+    /// Import a repository's worktree into a workspace
+    #[cmd_group("Repository Operations")]
     Import(import::ImportArgs),
+    /// Switch current repo to a workspace
+    #[cmd_group("Repository Operations")]
     Switch(switch::SwitchArgs),
+    /// Manage host aliases
+    #[cmd_group("Utilities")]
     Host(host::HostArgs),
+    /// Generate shell integration script
+    #[cmd_group("Utilities")]
     ShellInit(shell_init::ShellInitArgs),
 }
 
 /// Run the CLI
 pub async fn run() -> anyhow::Result<()> {
-    use colored::Colorize;
+    let args: Vec<String> = std::env::args().collect();
+    
+    // Build command for help display
+    let cmd = Cli::command();
+    
+    // Handle --help and -h for main command
+    if args.len() == 1 || (args.len() == 2 && (args[1] == "-h" || args[1] == "--help")) {
+        print_help();
+        return Ok(());
+    }
+    
+    // Handle help subcommand: wtp help [command]
+    if args.len() >= 2 && args[1] == "help" {
+        if args.len() >= 3 {
+            // Show help for specific subcommand
+            let subcmd_name = &args[2];
+            if let Some(subcmd) = cmd.find_subcommand(subcmd_name) {
+                let mut subcmd_clone = subcmd.clone();
+                subcmd_clone.print_help()?;
+                println!();
+            } else {
+                eprintln!("{}: Unknown command '{}'", "Error".red().bold(), subcmd_name);
+                std::process::exit(1);
+            }
+        } else {
+            print_help();
+        }
+        return Ok(());
+    }
+    
+    // Handle <cmd> --help for subcommands
+    if args.len() >= 3 && (args[2] == "--help" || args[2] == "-h") {
+        let subcmd_name = &args[1];
+        if let Some(subcmd) = cmd.find_subcommand(subcmd_name) {
+            let mut subcmd_clone = subcmd.clone();
+            subcmd_clone.print_help()?;
+            println!();
+            return Ok(());
+        }
+    }
 
     let cli = Cli::parse();
 

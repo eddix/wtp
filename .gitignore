@@ -1,5 +1,6 @@
 # Rust build artifacts
 /target/
+wtp-derive/target/
 **/*.rs.bk
 Cargo.lock
 

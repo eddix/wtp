@@ -39,6 +39,10 @@ pub struct GlobalConfig {
     /// Hooks configuration for workspace lifecycle events
     #[serde(default)]
     pub hooks: HooksConfig,
+
+    /// Path to the config file this was loaded from (not serialized)
+    #[serde(skip)]
+    pub config_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +76,7 @@ impl Default for GlobalConfig {
             hosts: HashMap::new(),
             default_host: None,
             hooks: HooksConfig::default(),
+            config_path: None,
         }
     }
 }
@@ -135,6 +140,8 @@ impl GlobalConfig {
                             .to_string()
                             .into();
                     }
+                    // Remember which file we loaded from
+                    cfg.config_path = Some(path.clone());
                     config = Some(cfg);
                     loaded_path = Some(path.clone());
                 }
@@ -158,15 +165,25 @@ impl GlobalConfig {
         }
     }
 
-    /// Save configuration to the default location (~/.wtp/config.toml)
+    /// Save configuration to the file it was loaded from,
+    /// or to the default location (~/.wtp/config.toml) if not loaded from file
     pub fn save(&self) -> Result<()> {
-        let config_dir = dirs::home_dir()
-            .ok_or_else(|| WtpError::config("Could not find home directory"))?
-            .join(".wtp");
+        let config_path = match &self.config_path {
+            Some(path) => path.clone(),
+            None => {
+                // Default location: ~/.wtp/config.toml
+                dirs::home_dir()
+                    .ok_or_else(|| WtpError::config("Could not find home directory"))?
+                    .join(".wtp")
+                    .join("config.toml")
+            }
+        };
 
-        std::fs::create_dir_all(&config_dir)?;
+        // Create parent directories if needed
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
 
-        let config_path = config_dir.join("config.toml");
         let content = toml::to_string_pretty(self)?;
         std::fs::write(&config_path, content)?;
 

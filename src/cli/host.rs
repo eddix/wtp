@@ -15,32 +15,19 @@ pub struct HostArgs {
 }
 
 #[derive(Subcommand, Debug)]
-#[command(
-    help_template = concat!(
-        "{about}\n\n",
-        "{usage-heading} {usage}\n\n",
-        "Commands:\n",
-        "  \x1b[32madd\x1b[0m         Add a new host alias\n",
-        "  \x1b[32mls\x1b[0m          List all configured hosts\n",
-        "  \x1b[32mrm\x1b[0m          Remove a host alias\n",
-        "  \x1b[32mset-default\x1b[0m Set the default host\n\n",
-        "Options:\n",
-        "{options}"
-    )
-)]
 pub enum HostCommands {
-    #[command(hide = true)]
+    /// Add a new host alias
     Add {
         alias: String,
         path: String,
     },
-    #[command(hide = true)]
+    /// List all configured hosts
     Ls,
-    #[command(hide = true)]
+    /// Remove a host alias
     Rm {
         alias: String,
     },
-    #[command(hide = true)]
+    /// Set the default host
     SetDefault {
         alias: String,
     },
