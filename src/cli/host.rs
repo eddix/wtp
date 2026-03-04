@@ -6,7 +6,7 @@ use clap::{Args, Subcommand};
 use colored::Colorize;
 use std::path::PathBuf;
 
-use crate::core::{GlobalConfig, WorkspaceManager};
+use crate::core::WorkspaceManager;
 
 #[derive(Args, Debug)]
 pub struct HostArgs {
@@ -33,7 +33,7 @@ pub enum HostCommands {
     },
 }
 
-pub async fn execute(args: HostArgs, mut manager: WorkspaceManager) -> anyhow::Result<()> {
+pub async fn execute(args: HostArgs, manager: WorkspaceManager) -> anyhow::Result<()> {
     match args.command {
         HostCommands::Add { alias, path } => add_host(alias, path, manager).await,
         HostCommands::Ls => list_hosts(manager).await,
@@ -86,7 +86,7 @@ async fn add_host(
         .insert(alias.clone(), crate::core::config::HostConfig { root: path_buf });
     
     // Save config
-    manager.global_config().save()?;
+    manager.loaded_config().save()?;
 
     println!(
         "{} Added host alias '{}' -> {}",
@@ -160,7 +160,7 @@ async fn remove_host(
     manager.global_config_mut().hosts.remove(&alias);
     
     // Save config
-    manager.global_config().save()?;
+    manager.loaded_config().save()?;
 
     println!(
         "{} Removed host alias '{}'",
@@ -178,7 +178,7 @@ async fn set_default_host(
     // Special case: "none" to unset
     if alias == "none" || alias == "null" || alias == "-" {
         manager.global_config_mut().default_host = None;
-        manager.global_config().save()?;
+        manager.loaded_config().save()?;
         println!("{} Unset default host", "✓".green().bold());
         return Ok(());
     }
@@ -194,7 +194,7 @@ async fn set_default_host(
 
     // Set as default
     manager.global_config_mut().default_host = Some(alias.clone());
-    manager.global_config().save()?;
+    manager.loaded_config().save()?;
 
     println!(
         "{} Set '{}' as default host",

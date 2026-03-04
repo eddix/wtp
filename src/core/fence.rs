@@ -29,7 +29,8 @@ impl Fence {
         Self::new(config.workspace_root.clone())
     }
 
-    /// Disable interactive prompts (for testing or CI)
+    /// Disable interactive prompts (for testing)
+    #[cfg(test)]
     pub fn non_interactive(mut self) -> Self {
         self.interactive = false;
         self
@@ -47,8 +48,17 @@ impl Fence {
                 || canonical_path.starts_with(&canonical_boundary);
         }
 
+        // Path doesn't exist - need to check if it's within boundary
+        // Handle the case where path is absolute but boundary has symlinks (e.g., /var -> /private/var on macOS)
         let candidate = if path.is_absolute() {
-            path.to_path_buf()
+            // Check if path starts with the non-canonical boundary
+            if let Ok(rel_path) = path.strip_prefix(&self.boundary) {
+                // Path is within boundary - use canonical boundary as base
+                canonical_boundary.join(rel_path)
+            } else {
+                // Path is outside boundary
+                path.to_path_buf()
+            }
         } else {
             canonical_boundary.join(path)
         };
@@ -119,13 +129,6 @@ impl Fence {
         Ok(())
     }
 
-    /// Remove a file
-    pub fn remove_file(&self, path: &Path) -> Result<()> {
-        self.check_path(path, "remove file")?;
-        std::fs::remove_file(path)?;
-        Ok(())
-    }
-
     /// Get the boundary path
     pub fn boundary(&self) -> &Path {
         &self.boundary
@@ -157,7 +160,6 @@ pub fn ensure_fence(config: &crate::core::GlobalConfig) -> Fence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     #[test]
     fn test_within_boundary() {

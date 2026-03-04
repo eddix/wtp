@@ -1,7 +1,9 @@
 //! CLI module containing all subcommand implementations
 
 pub mod cd;
+pub mod config;
 pub mod create;
+pub mod fuzzy;
 pub mod host;
 pub mod import;
 pub mod ls;
@@ -10,7 +12,7 @@ pub mod shell_init;
 pub mod status;
 pub mod switch;
 
-use clap::{Command, CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
 use wtp_derive::GroupedSubcommand;
 
@@ -55,6 +57,9 @@ pub enum Commands {
     /// Show status of a workspace
     #[cmd_group("Workspace Management")]
     Status(status::StatusArgs),
+    /// Show current configuration
+    #[cmd_group("Utilities")]
+    Config(config::ConfigArgs),
     /// Import a repository's worktree into a workspace
     #[cmd_group("Repository Operations")]
     Import(import::ImportArgs),
@@ -122,7 +127,7 @@ pub async fn run() -> anyhow::Result<()> {
     }
 
     // Load global config
-    let (global_config, warning) = crate::core::GlobalConfig::load()?;
+    let (loaded_config, warning) = crate::core::LoadedConfig::load()?;
 
     // Print warning if multiple config files exist
     if let Some(warn) = warning {
@@ -130,21 +135,22 @@ pub async fn run() -> anyhow::Result<()> {
     }
 
     // Initialize security fence
-    crate::core::fence::init_global_fence(global_config.workspace_root.clone());
+    crate::core::fence::init_global_fence(loaded_config.config.workspace_root.clone());
 
     // Execute command
     match cli.command {
-        Commands::Cd(args) => cd::execute(args, crate::core::WorkspaceManager::new(global_config)).await?,
-        Commands::Create(args) => create::execute(args, crate::core::WorkspaceManager::new(global_config)).await?,
-        Commands::Ls(args) => ls::execute(args, crate::core::WorkspaceManager::new(global_config)).await?,
-        Commands::Remove(args) => remove::execute(args, crate::core::WorkspaceManager::new(global_config)).await?,
-        Commands::Status(args) => status::execute(args, crate::core::WorkspaceManager::new(global_config)).await?,
-        Commands::Import(args) => import::execute(args, crate::core::WorkspaceManager::new(global_config)).await?,
+        Commands::Cd(args) => cd::execute(args, crate::core::WorkspaceManager::new(loaded_config)).await?,
+        Commands::Create(args) => create::execute(args, crate::core::WorkspaceManager::new(loaded_config)).await?,
+        Commands::Ls(args) => ls::execute(args, crate::core::WorkspaceManager::new(loaded_config)).await?,
+        Commands::Remove(args) => remove::execute(args, crate::core::WorkspaceManager::new(loaded_config)).await?,
+        Commands::Status(args) => status::execute(args, crate::core::WorkspaceManager::new(loaded_config)).await?,
+        Commands::Import(args) => import::execute(args, crate::core::WorkspaceManager::new(loaded_config)).await?,
         Commands::Switch(args) => {
-            let mut manager = crate::core::WorkspaceManager::new(global_config);
+            let manager = crate::core::WorkspaceManager::new(loaded_config);
             switch::execute(args, manager).await?
         }
-        Commands::Host(args) => host::execute(args, crate::core::WorkspaceManager::new(global_config)).await?,
+        Commands::Host(args) => host::execute(args, crate::core::WorkspaceManager::new(loaded_config)).await?,
+        Commands::Config(args) => config::execute(args, crate::core::WorkspaceManager::new(loaded_config)).await?,
         Commands::ShellInit(args) => shell_init::execute(args).await?,
     }
 

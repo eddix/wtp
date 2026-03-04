@@ -28,7 +28,6 @@ pub async fn execute(args: RemoveArgs, mut manager: WorkspaceManager) -> anyhow:
     let path = manager
         .global_config()
         .get_workspace_path(&args.name)
-        .cloned()
         .unwrap();
 
     if args.delete_dir && !args.force {

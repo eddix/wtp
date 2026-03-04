@@ -2,7 +2,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Fields, Meta};
+use syn::{parse_macro_input, Data, DeriveInput, Fields};
 
 /// Derive macro to add group information to subcommand enums
 ///
@@ -37,7 +37,15 @@ pub fn derive_grouped_subcommand(input: TokenStream) -> TokenStream {
     let mut entries = Vec::new();
     for variant in &data.variants {
         let variant_name = &variant.ident;
-        let variant_name_str = variant_name.to_string().to_lowercase();
+        // Convert CamelCase to kebab-case (e.g., ShellInit -> shell-init)
+        let variant_name_str = variant_name.to_string();
+        let mut kebab = String::new();
+        for (i, c) in variant_name_str.chars().enumerate() {
+            if c.is_uppercase() && i > 0 {
+                kebab.push('-');
+            }
+            kebab.push(c.to_lowercase().next().unwrap());
+        }
         
         // Get the about text from doc comments
         let about = variant
@@ -76,7 +84,7 @@ pub fn derive_grouped_subcommand(input: TokenStream) -> TokenStream {
             })
             .unwrap_or_else(|| "Other".to_string());
 
-        entries.push((variant_name_str, about, group));
+        entries.push((kebab, about, group));
     }
 
     // Generate match arm for group() method

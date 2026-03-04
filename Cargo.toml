@@ -31,9 +31,9 @@ anyhow = "1.0"
 tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "process", "io-util"] }
 
 # TUI framework
-ratatui = { version = "0.29", features = ["crossterm"] }
-crossterm = "0.28"
-# skimmer = { version = "0.15", optional = true }
+ratatui = "0.30"
+crossterm = "0.29"
+skim = { version = "3.6", default-features = false, optional = true }
 
 # Utilities
 dirs = "5.0"
@@ -52,5 +52,5 @@ indexmap = { version = "2.6", features = ["serde"] }
 tempfile = "3.13"
 
 [features]
-default = []
-# skimm = ["skimmer"]
+default = ["fuzzy"]
+fuzzy = ["skim"]

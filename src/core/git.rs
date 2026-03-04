@@ -4,6 +4,7 @@
 //! direct manipulation of .git internals.
 
 use crate::core::error::{Result, WtpError};
+use colored::Colorize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -114,68 +115,6 @@ impl GitClient {
         Ok(output.status.success())
     }
 
-    /// Check if a branch is already checked out in a worktree
-    /// Returns the worktree path if already checked out
-    pub fn is_branch_checked_out(&self, repo_path: &Path, branch: &str) -> Result<Option<PathBuf>> {
-        let worktrees = self.list_worktrees(repo_path)?;
-
-        for worktree in worktrees {
-            // Get the branch for this worktree
-            let wt_branch = self.get_worktree_branch(&worktree)?;
-            if wt_branch == branch {
-                return Ok(Some(worktree));
-            }
-        }
-
-        Ok(None)
-    }
-
-    /// Get the branch checked out in a worktree
-    fn get_worktree_branch(&self, worktree_path: &Path) -> Result<String> {
-        let output = Command::new("git")
-            .current_dir(worktree_path)
-            .arg("rev-parse")
-            .arg("--abbrev-ref")
-            .arg("HEAD")
-            .output()?;
-
-        if !output.status.success() {
-            // Worktree might be in detached HEAD state
-            return Ok("(detached)".to_string());
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    }
-
-    /// List all worktrees for a repository
-    pub fn list_worktrees(&self, repo_path: &Path) -> Result<Vec<PathBuf>> {
-        let output = Command::new("git")
-            .current_dir(repo_path)
-            .arg("worktree")
-            .arg("list")
-            .arg("--porcelain")
-            .output()?;
-
-        if !output.status.success() {
-            return Err(WtpError::git(format!(
-                "Failed to list worktrees: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )));
-        }
-
-        let mut worktrees = Vec::new();
-        let output_str = String::from_utf8_lossy(&output.stdout);
-
-        for line in output_str.lines() {
-            if line.starts_with("worktree ") {
-                let path = line.strip_prefix("worktree ").unwrap();
-                worktrees.push(PathBuf::from(path));
-            }
-        }
-
-        Ok(worktrees)
-    }
-
     /// Create a new worktree with a new branch
     pub fn create_worktree_with_branch(
         &self,
@@ -264,49 +203,6 @@ impl GitClient {
         Ok(())
     }
 
-    /// Remove a worktree
-    pub fn remove_worktree(&self, repo_path: &Path, worktree_path: &Path, force: bool) -> Result<()> {
-        let mut cmd = Command::new("git");
-        cmd.current_dir(repo_path)
-            .arg("worktree")
-            .arg("remove");
-
-        if force {
-            cmd.arg("--force");
-        }
-
-        cmd.arg(worktree_path);
-
-        let output = cmd.output()?;
-
-        if !output.status.success() {
-            return Err(WtpError::git(format!(
-                "Failed to remove worktree: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )));
-        }
-
-        Ok(())
-    }
-
-    /// Check if working directory has uncommitted changes
-    pub fn is_dirty(&self, repo_path: &Path) -> Result<bool> {
-        let output = Command::new("git")
-            .current_dir(repo_path)
-            .arg("status")
-            .arg("--porcelain")
-            .output()?;
-
-        if !output.status.success() {
-            return Err(WtpError::git(format!(
-                "Failed to check status: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )));
-        }
-
-        Ok(!output.stdout.is_empty())
-    }
-
     /// Get detailed status of a repository
     pub fn get_status(&self, repo_path: &Path) -> Result<GitStatus> {
         let output = Command::new("git")
@@ -326,7 +222,9 @@ impl GitClient {
         let output_str = String::from_utf8_lossy(&output.stdout);
         let mut ahead = 0;
         let mut behind = 0;
-        let mut dirty = false;
+        let mut staged = 0u32;
+        let mut unstaged = 0u32;
+        let mut untracked = 0u32;
 
         for line in output_str.lines() {
             if line.starts_with("## ") {
@@ -348,22 +246,94 @@ impl GitClient {
                         behind = line[start..start + end].trim().parse().unwrap_or(0);
                     }
                 }
-            } else if !line.is_empty() {
-                dirty = true;
+            } else if !line.is_empty() && line.len() >= 2 {
+                let bytes = line.as_bytes();
+                let x = bytes[0];
+                let y = bytes[1];
+
+                if x == b'?' && y == b'?' {
+                    untracked += 1;
+                } else {
+                    if x != b' ' && x != b'?' {
+                        staged += 1;
+                    }
+                    if y != b' ' && y != b'?' {
+                        unstaged += 1;
+                    }
+                }
             }
         }
+
+        let dirty = staged > 0 || unstaged > 0 || untracked > 0;
 
         Ok(GitStatus {
             dirty,
             ahead,
             behind,
+            staged,
+            unstaged,
+            untracked,
         })
     }
 
-    /// Check if a worktree path already exists
-    pub fn worktree_exists(&self, repo_path: &Path, worktree_path: &Path) -> Result<bool> {
-        let worktrees = self.list_worktrees(repo_path)?;
-        Ok(worktrees.iter().any(|p| p == worktree_path))
+    /// Get the subject line of the last commit
+    pub fn get_last_commit_subject(&self, repo_path: &Path) -> Result<String> {
+        let output = Command::new("git")
+            .current_dir(repo_path)
+            .arg("log")
+            .arg("-1")
+            .arg("--format=%s")
+            .output()?;
+
+        if !output.status.success() {
+            return Err(WtpError::git(format!(
+                "Failed to get last commit subject: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    /// Get the relative time of the last commit (e.g., "2 hours ago")
+    pub fn get_last_commit_relative_time(&self, repo_path: &Path) -> Result<String> {
+        let output = Command::new("git")
+            .current_dir(repo_path)
+            .arg("log")
+            .arg("-1")
+            .arg("--format=%cr")
+            .output()?;
+
+        if !output.status.success() {
+            return Err(WtpError::git(format!(
+                "Failed to get last commit time: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    /// Get the stash count for a repository
+    pub fn get_stash_count(&self, repo_path: &Path) -> Result<u32> {
+        let output = Command::new("git")
+            .current_dir(repo_path)
+            .arg("stash")
+            .arg("list")
+            .output()?;
+
+        if !output.status.success() {
+            return Err(WtpError::git(format!(
+                "Failed to get stash list: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
+        }
+
+        let count = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|l| !l.is_empty())
+            .count() as u32;
+        Ok(count)
     }
 }
 
@@ -382,25 +352,84 @@ pub struct GitStatus {
     pub ahead: u32,
     /// Commits behind remote
     pub behind: u32,
+    /// Number of staged files
+    pub staged: u32,
+    /// Number of modified but unstaged files
+    pub unstaged: u32,
+    /// Number of untracked files
+    pub untracked: u32,
 }
 
 impl GitStatus {
-    /// Format status as a compact string
+    /// Format status as a compact colored string
     pub fn format_compact(&self) -> String {
-        let mut parts: Vec<String> = Vec::new();
-        if self.dirty {
-            parts.push("*".to_string());
+        if !self.dirty && self.ahead == 0 && self.behind == 0 {
+            return format!("{}", "\u{2713} clean".green());
         }
+
+        let mut parts: Vec<String> = Vec::new();
+
+        if self.dirty {
+            let mut detail = Vec::new();
+            if self.staged > 0 {
+                detail.push(format!("{} staged", self.staged));
+            }
+            if self.unstaged > 0 {
+                detail.push(format!("{} unstaged", self.unstaged));
+            }
+            if self.untracked > 0 {
+                detail.push(format!("{} untracked", self.untracked));
+            }
+            let status_str = format!("* {}", detail.join(", "));
+            parts.push(format!("{}", status_str.yellow()));
+        }
+
+        if self.ahead > 0 || self.behind > 0 {
+            let mut remote_parts = Vec::new();
+            if self.ahead > 0 {
+                remote_parts.push(format!("{}", format!("+{}", self.ahead).green()));
+            }
+            if self.behind > 0 {
+                remote_parts.push(format!("{}", format!("-{}", self.behind).red()));
+            }
+            parts.push(format!("({})", remote_parts.join(" ")));
+        }
+
+        parts.join("  ")
+    }
+
+    /// Format detailed status info for the --long view
+    pub fn format_detail_status(&self) -> String {
+        if !self.dirty {
+            return format!("{}", "\u{2713} clean".green());
+        }
+
+        let mut detail = Vec::new();
+        if self.staged > 0 {
+            detail.push(format!("{} staged", self.staged));
+        }
+        if self.unstaged > 0 {
+            detail.push(format!("{} unstaged", self.unstaged));
+        }
+        if self.untracked > 0 {
+            detail.push(format!("{} untracked", self.untracked));
+        }
+        format!("{}", detail.join(", ").yellow())
+    }
+
+    /// Format remote tracking info for the --long view
+    pub fn format_detail_remote(&self) -> String {
+        if self.ahead == 0 && self.behind == 0 {
+            return format!("{}", "up to date".green());
+        }
+
+        let mut parts = Vec::new();
         if self.ahead > 0 {
-            parts.push(format!("+{}", self.ahead));
+            parts.push(format!("{}", format!("+{} ahead", self.ahead).green()));
         }
         if self.behind > 0 {
-            parts.push(format!("-{}", self.behind));
+            parts.push(format!("{}", format!("-{} behind", self.behind).red()));
         }
-        if parts.is_empty() {
-            "clean".to_string()
-        } else {
-            parts.join(" ")
-        }
+        parts.join(", ")
     }
 }

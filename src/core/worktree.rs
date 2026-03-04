@@ -13,9 +13,6 @@ impl WorktreeId {
         Self(uuid::Uuid::new_v4().to_string())
     }
 
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
 impl Default for WorktreeId {
@@ -121,10 +118,6 @@ impl WorktreeEntry {
         }
     }
 
-    /// Get the full path to the worktree
-    pub fn full_path(&self, workspace_root: &std::path::Path) -> PathBuf {
-        workspace_root.join(&self.worktree_path)
-    }
 }
 
 /// The worktree.toml file structure stored in .wtp/ directory
@@ -175,40 +168,9 @@ impl WorktreeToml {
         self.worktrees.push(entry);
     }
 
-    /// Find a worktree by ID
-    pub fn find_by_id(&self, id: &WorktreeId) -> Option<&WorktreeEntry> {
-        self.worktrees.iter().find(|w| w.id == *id)
-    }
-
-    /// Find a worktree by branch name and repo
-    pub fn find_by_branch_and_repo(&self, branch: &str, repo: &RepoRef) -> Option<&WorktreeEntry> {
-        self.worktrees
-            .iter()
-            .find(|w| w.branch == branch && w.repo == *repo)
-    }
-
     /// Find a worktree by repo (any branch)
     pub fn find_by_repo(&self, repo: &RepoRef) -> Option<&WorktreeEntry> {
         self.worktrees.iter().find(|w| w.repo == *repo)
-    }
-
-    /// Remove a worktree by ID
-    pub fn remove_by_id(&mut self, id: &WorktreeId) -> bool {
-        let len = self.worktrees.len();
-        self.worktrees.retain(|w| w.id != *id);
-        self.worktrees.len() < len
-    }
-
-    /// Check if a branch is already tracked in this workspace
-    pub fn has_branch(&self, branch: &str, repo: &RepoRef) -> bool {
-        self.worktrees
-            .iter()
-            .any(|w| w.branch == branch && w.repo == *repo)
-    }
-
-    /// Check if a repo already has any worktree in this workspace
-    pub fn has_repo(&self, repo: &RepoRef) -> bool {
-        self.worktrees.iter().any(|w| w.repo == *repo)
     }
 }
 
@@ -234,16 +196,8 @@ impl WorktreeManager {
             .unwrap_or_else(|| self.config.save(&self.config_path))
     }
     
-    pub fn save_with_fence(&self, fence: &crate::core::fence::Fence) -> crate::core::Result<()> {
-        self.config.save_with_fence(&self.config_path, fence)
-    }
-
     pub fn config(&self) -> &WorktreeToml {
         &self.config
-    }
-
-    pub fn config_mut(&mut self) -> &mut WorktreeToml {
-        &mut self.config
     }
 
     /// Generate a unique worktree path for a repo

@@ -3,11 +3,11 @@
 use clap::Args;
 use colored::Colorize;
 
-use crate::core::WorkspaceManager;
+use crate::core::{GitClient, WorkspaceManager, WorktreeManager};
 
 #[derive(Args, Debug)]
 pub struct LsArgs {
-    /// Show detailed information
+    /// Show detailed information including repo status
     #[arg(short, long)]
     long: bool,
 
@@ -37,33 +37,87 @@ pub async fn execute(args: LsArgs, manager: WorkspaceManager) -> anyhow::Result<
             println!("{}", ws.name);
         }
     } else if args.long {
-        // Detailed listing
-        println!("{:<20} {:<40} {}", "NAME", "PATH", "STATUS");
-        for ws in workspaces {
-            let status = if ws.exists {
-                "ok".dimmed().to_string()
-            } else {
-                "missing".red().to_string()
-            };
-            println!(
-                "{:<20} {:<40} {}",
-                ws.name.cyan(),
-                ws.path.display().to_string().dimmed(),
-                status
-            );
+        // Detailed listing with repo details
+        let git = GitClient::new();
+
+        for (i, ws) in workspaces.iter().enumerate() {
+            if i > 0 {
+                println!();
+            }
+
+            if !ws.exists || !ws.path.join(".wtp").exists() {
+                println!(
+                    "{}  {}",
+                    ws.name.cyan().bold(),
+                    "[missing]".red()
+                );
+                continue;
+            }
+
+            println!("{}", ws.name.cyan().bold());
+
+            match WorktreeManager::load(&ws.path) {
+                Ok(wt_manager) => {
+                    let worktrees = wt_manager.list_worktrees();
+                    if worktrees.is_empty() {
+                        println!("  {}", "(no repos)".dimmed());
+                    } else {
+                        for wt in worktrees {
+                            let wt_full_path = ws.path.join(&wt.worktree_path);
+                            let repo_display = wt.repo.display();
+
+                            if !wt_full_path.exists() {
+                                println!(
+                                    "  {:<30} {:<20} {}",
+                                    repo_display,
+                                    wt.branch.cyan(),
+                                    "? missing".red()
+                                );
+                                continue;
+                            }
+
+                            let status_str = match git.get_status(&wt_full_path) {
+                                Ok(s) => s.format_compact(),
+                                Err(_) => "?".to_string(),
+                            };
+
+                            println!(
+                                "  {:<30} {:<20} {}",
+                                repo_display,
+                                wt.branch.cyan(),
+                                status_str
+                            );
+                        }
+                    }
+                }
+                Err(_) => {
+                    println!("  {}", "(error loading worktrees)".red());
+                }
+            }
         }
     } else {
-        // Simple listing
+        // Default listing: name + repo count
         for ws in workspaces {
-            let name = ws.name.cyan().to_string();
+            let name = ws.name.cyan().bold().to_string();
 
-            let status = if !ws.exists {
-                " [missing]".red().to_string()
-            } else {
-                String::new()
+            if !ws.exists || !ws.path.join(".wtp").exists() {
+                println!("{}  {}", name, "[missing]".red());
+                continue;
+            }
+
+            let repo_info = match WorktreeManager::load(&ws.path) {
+                Ok(wt_manager) => {
+                    let count = wt_manager.list_worktrees().len();
+                    match count {
+                        0 => "(no repos)".to_string(),
+                        1 => "(1 repo)".to_string(),
+                        n => format!("({} repos)", n),
+                    }
+                }
+                Err(_) => "(error)".to_string(),
             };
 
-            println!("{}{}", name, status);
+            println!("{}  {}", name, repo_info.dimmed());
         }
     }
 
