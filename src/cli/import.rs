@@ -1,14 +1,14 @@
 //! Import worktree command
 //!
 //! Import an external git repository's worktree into the current workspace.
-//! If you're in a workspace directory, it uses that workspace by default.
-//! Otherwise, use --workspace to specify the target.
+//! Must be run from within a workspace directory.
 
 use clap::Args;
 use colored::Colorize;
 use std::env;
 use std::path::PathBuf;
 
+use super::fuzzy;
 use crate::core::{
     fence::Fence, GitClient, RepoRef, WorktreeEntry, WorktreeManager, WorkspaceManager,
 };
@@ -18,10 +18,6 @@ pub struct ImportArgs {
     /// Path to the repository (relative to host root or absolute)
     #[arg(value_name = "PATH")]
     path: Option<String>,
-
-    /// Workspace to import into (defaults to current workspace if in one)
-    #[arg(short, long, value_name = "NAME")]
-    workspace: Option<String>,
 
     /// Host alias to use for resolving the repository path
     #[arg(short = 'H', long, value_name = "ALIAS")]
@@ -44,24 +40,8 @@ pub async fn execute(args: ImportArgs, manager: WorkspaceManager) -> anyhow::Res
     let git = GitClient::new();
     git.check_git()?;
 
-    // Determine target workspace
-    let (workspace_name, workspace_path) = if let Some(name) = args.workspace {
-        // Use explicitly specified workspace
-        let path = manager
-            .global_config()
-            .get_workspace_path(&name)
-            .cloned()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Workspace '{}' not found. Create it with: wtp create {}",
-                    name, name
-                )
-            })?;
-        (name, path)
-    } else {
-        // Try to detect current workspace from current directory
-        detect_current_workspace(&manager)?
-    };
+    // Determine target workspace — must be in a workspace directory
+    let (workspace_name, workspace_path) = detect_current_workspace(&manager)?;
 
     if !workspace_path.exists() {
         anyhow::bail!(
@@ -117,14 +97,12 @@ pub async fn execute(args: ImportArgs, manager: WorkspaceManager) -> anyhow::Res
             anyhow::bail!("Repository not found: {}", path.display());
         }
         RepoRef::Absolute { path }
-    } else {
-        // Need a path argument
-        let path = args.path.ok_or_else(|| {
-            anyhow::anyhow!("Repository path required when not using --repo")
-        })?;
-
-        // Resolve using host aliases
+    } else if let Some(path) = args.path {
+        // Positional path argument provided
         resolve_repo_ref(&manager, &path, args.host.as_deref())?
+    } else {
+        // No path or repo specified — interactive selection
+        resolve_repo_interactively(&manager, args.host.as_deref())?
     };
 
     // Get absolute path to repository
@@ -242,7 +220,7 @@ fn detect_current_workspace(
         // Check if this directory has a .wtp subdirectory
         if check_dir.join(".wtp").is_dir() {
             // Find which workspace this is
-            for (name, path) in manager.global_config().workspaces.iter() {
+            for (name, path) in manager.global_config().scan_workspaces().iter() {
                 if path == check_dir {
                     return Ok((name.clone(), path.clone()));
                 }
@@ -266,10 +244,38 @@ fn detect_current_workspace(
 
     // Not in any workspace
     anyhow::bail!(
-        "Not in a workspace. Either:\n\
-         1. Run this command from within a workspace directory, or\n\
-         2. Use --workspace <NAME> to specify the target workspace"
+        "Not in a workspace directory.\n\
+         Run this command from within a workspace directory."
     )
+}
+
+/// Resolve repository interactively when no path is provided.
+/// Determines host (--host > default_host > fuzzy select), then scans for repos.
+fn resolve_repo_interactively(
+    manager: &WorkspaceManager,
+    host: Option<&str>,
+) -> anyhow::Result<RepoRef> {
+    // Determine host alias: --host > default_host > interactive selection
+    let host_alias = if let Some(h) = host {
+        // Verify the host exists
+        manager
+            .global_config()
+            .get_host_root(h)
+            .ok_or_else(|| anyhow::anyhow!("Host alias '{}' not found in config", h))?;
+        h.to_string()
+    } else if let Some(default) = manager.global_config().default_host_alias() {
+        default.to_string()
+    } else {
+        fuzzy::resolve_host_interactively(manager, "wtp import")?
+    };
+
+    // Scan and select repo under this host
+    let repo_path = fuzzy::resolve_repo_interactively(manager, &host_alias, "wtp import")?;
+
+    Ok(RepoRef::Hosted {
+        host: host_alias,
+        path: repo_path,
+    })
 }
 
 /// Resolve a repository reference from path and optional host
@@ -300,6 +306,13 @@ fn resolve_repo_ref(
         let expanded = shellexpand::tilde(path).to_string();
         let path_buf = PathBuf::from(&expanded);
 
-        Ok(RepoRef::Absolute { path: path_buf })
+        // Convert to absolute path if it's relative
+        let absolute_path = if path_buf.is_absolute() {
+            path_buf
+        } else {
+            std::env::current_dir()?.join(path_buf)
+        };
+
+        Ok(RepoRef::Absolute { path: absolute_path })
     }
 }

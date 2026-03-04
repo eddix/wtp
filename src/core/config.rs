@@ -6,10 +6,103 @@
 //! 3. ~/.config/wtp/config.toml
 
 use crate::core::error::{Result, WtpError};
-use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+/// Runtime handle for a loaded configuration
+/// 
+/// This separates the configuration data (`GlobalConfig`) from runtime metadata
+/// like the file path it was loaded from.
+#[derive(Debug, Clone)]
+pub struct LoadedConfig {
+    /// The configuration data
+    pub config: GlobalConfig,
+    /// Path to the config file this was loaded from (runtime metadata, not serialized)
+    pub source_path: Option<PathBuf>,
+}
+
+impl LoadedConfig {
+    /// Load configuration from the first existing config file
+    /// Returns the loaded config with source path, and an optional warning about multiple files
+    pub fn load() -> Result<(Self, Option<String>)> {
+        let paths = GlobalConfig::config_paths();
+        let mut found_paths: Vec<PathBuf> = Vec::new();
+        let mut loaded_path: Option<PathBuf> = None;
+        let mut config: Option<GlobalConfig> = None;
+
+        for path in &paths {
+            if path.exists() {
+                found_paths.push(path.clone());
+                if config.is_none() {
+                    let content = std::fs::read_to_string(path)?;
+                    let mut cfg: GlobalConfig = toml::from_str(&content)?;
+                    // Expand ~ in workspace_root
+                    cfg.workspace_root = shellexpand::tilde(&cfg.workspace_root.to_string_lossy())
+                        .to_string()
+                        .into();
+                    // Expand ~ in host roots
+                    for host in cfg.hosts.values_mut() {
+                        host.root = shellexpand::tilde(&host.root.to_string_lossy())
+                            .to_string()
+                            .into();
+                    }
+                    // Expand ~ in hook paths
+                    if let Some(ref mut hook_path) = cfg.hooks.on_create {
+                        *hook_path = shellexpand::tilde(&hook_path.to_string_lossy())
+                            .to_string()
+                            .into();
+                    }
+                    config = Some(cfg);
+                    loaded_path = Some(path.clone());
+                }
+            }
+        }
+
+        let warning = if found_paths.len() > 1 {
+            let files: Vec<_> = found_paths.iter().map(|p| p.display().to_string()).collect();
+            Some(format!(
+                "⚠️  Warning: Multiple config files found: {}. Using {}",
+                files.join(", "),
+                loaded_path.as_ref().unwrap().display()
+            ))
+        } else {
+            None
+        };
+
+        let loaded = Self {
+            config: config.unwrap_or_default(),
+            source_path: loaded_path,
+        };
+
+        Ok((loaded, warning))
+    }
+
+    /// Save configuration to the file it was loaded from,
+    /// or to the default location (~/.wtp/config.toml) if not loaded from file
+    pub fn save(&self) -> Result<()> {
+        let config_path = match &self.source_path {
+            Some(path) => path.clone(),
+            None => {
+                // Default location: ~/.wtp/config.toml
+                dirs::home_dir()
+                    .ok_or_else(|| WtpError::config("Could not find home directory"))?
+                    .join(".wtp")
+                    .join("config.toml")
+            }
+        };
+
+        // Create parent directories if needed
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let content = toml::to_string_pretty(&self.config)?;
+        std::fs::write(&config_path, content)?;
+
+        Ok(())
+    }
+}
 
 /// Default workspace root directory name
 pub const DEFAULT_WORKSPACE_ROOT: &str = ".wtp/workspaces";
@@ -18,15 +111,14 @@ pub const DEFAULT_WORKSPACE_ROOT: &str = ".wtp/workspaces";
 pub const WTP_DIR: &str = ".wtp";
 
 /// The global configuration structure
+/// 
+/// This contains only the serializable configuration data.
+/// Use `LoadedConfig` for runtime access with metadata like source path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
     /// Root directory for all workspaces (default: ~/.wtp/workspaces)
     #[serde(default = "default_workspace_root")]
     pub workspace_root: PathBuf,
-
-    /// Map of workspace name to its path
-    #[serde(default)]
-    pub workspaces: IndexMap<String, PathBuf>,
 
     /// Host aliases mapping host name to root directory
     #[serde(default)]
@@ -39,10 +131,6 @@ pub struct GlobalConfig {
     /// Hooks configuration for workspace lifecycle events
     #[serde(default)]
     pub hooks: HooksConfig,
-
-    /// Path to the config file this was loaded from (not serialized)
-    #[serde(skip)]
-    pub config_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,11 +160,9 @@ impl Default for GlobalConfig {
     fn default() -> Self {
         Self {
             workspace_root: default_workspace_root(),
-            workspaces: IndexMap::new(),
             hosts: HashMap::new(),
             default_host: None,
             hooks: HooksConfig::default(),
-            config_path: None,
         }
     }
 }
@@ -104,122 +190,44 @@ impl GlobalConfig {
         paths
     }
 
-    /// Load configuration from the first existing config file
-    /// Returns the config and an optional warning about multiple files
-    pub fn load() -> Result<(Self, Option<String>)> {
-        let paths = Self::config_paths();
-        let mut found_paths: Vec<PathBuf> = Vec::new();
-        let mut loaded_path: Option<PathBuf> = None;
-        let mut config: Option<Self> = None;
-
-        for path in &paths {
-            if path.exists() {
-                found_paths.push(path.clone());
-                if config.is_none() {
-                    let content = std::fs::read_to_string(path)?;
-                    let mut cfg: Self = toml::from_str(&content)?;
-                    // Expand ~ in workspace_root
-                    cfg.workspace_root = shellexpand::tilde(&cfg.workspace_root.to_string_lossy())
-                        .to_string()
-                        .into();
-                    // Expand ~ in all workspace paths
-                    for path in cfg.workspaces.values_mut() {
-                        *path = shellexpand::tilde(&path.to_string_lossy())
-                            .to_string()
-                            .into();
-                    }
-                    // Expand ~ in host roots
-                    for host in cfg.hosts.values_mut() {
-                        host.root = shellexpand::tilde(&host.root.to_string_lossy())
-                            .to_string()
-                            .into();
-                    }
-                    // Expand ~ in hook paths
-                    if let Some(ref mut hook_path) = cfg.hooks.on_create {
-                        *hook_path = shellexpand::tilde(&hook_path.to_string_lossy())
-                            .to_string()
-                            .into();
-                    }
-                    // Remember which file we loaded from
-                    cfg.config_path = Some(path.clone());
-                    config = Some(cfg);
-                    loaded_path = Some(path.clone());
-                }
-            }
-        }
-
-        let warning = if found_paths.len() > 1 {
-            let files: Vec<_> = found_paths.iter().map(|p| p.display().to_string()).collect();
-            Some(format!(
-                "⚠️  Warning: Multiple config files found: {}. Using {}",
-                files.join(", "),
-                loaded_path.as_ref().unwrap().display()
-            ))
+    /// Get the path for a workspace by name
+    /// Scans the workspace_root for directories with .wtp subdirectory
+    pub fn get_workspace_path(&self, name: &str) -> Option<PathBuf> {
+        let path = self.workspace_root.join(name);
+        if path.is_dir() && path.join(WTP_DIR).is_dir() {
+            Some(path)
         } else {
             None
-        };
-
-        match config {
-            Some(cfg) => Ok((cfg, warning)),
-            None => Ok((Self::default(), warning)),
         }
-    }
-
-    /// Save configuration to the file it was loaded from,
-    /// or to the default location (~/.wtp/config.toml) if not loaded from file
-    pub fn save(&self) -> Result<()> {
-        let config_path = match &self.config_path {
-            Some(path) => path.clone(),
-            None => {
-                // Default location: ~/.wtp/config.toml
-                dirs::home_dir()
-                    .ok_or_else(|| WtpError::config("Could not find home directory"))?
-                    .join(".wtp")
-                    .join("config.toml")
-            }
-        };
-
-        // Create parent directories if needed
-        if let Some(parent) = config_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let content = toml::to_string_pretty(self)?;
-        std::fs::write(&config_path, content)?;
-
-        Ok(())
-    }
-
-    /// Get the path for a workspace by name
-    pub fn get_workspace_path(&self, name: &str) -> Option<&PathBuf> {
-        self.workspaces.get(name)
     }
 
     /// Check if a workspace exists
     pub fn has_workspace(&self, name: &str) -> bool {
-        self.workspaces.contains_key(name)
+        self.get_workspace_path(name).is_some()
     }
 
-    /// Add a new workspace
-    pub fn add_workspace(&mut self, name: String, path: PathBuf) -> Result<()> {
-        if let Some(existing_path) = self.workspaces.get(&name) {
-            return Err(WtpError::WorkspaceAlreadyExists {
-                name: name.clone(),
-                path: existing_path.clone(),
-            });
+    /// Scan all workspaces in workspace_root
+    /// Returns a map of workspace name to path for all valid workspaces
+    pub fn scan_workspaces(&self) -> HashMap<String, PathBuf> {
+        let mut workspaces = HashMap::new();
+        
+        if let Ok(entries) = std::fs::read_dir(&self.workspace_root) {
+            for entry in entries.flatten() {
+                if let Ok(file_type) = entry.file_type() {
+                    if file_type.is_dir() {
+                        let path = entry.path();
+                        // Check if this directory has a .wtp subdirectory
+                        if path.join(WTP_DIR).is_dir() {
+                            if let Some(name) = entry.file_name().to_str() {
+                                workspaces.insert(name.to_string(), path);
+                            }
+                        }
+                    }
+                }
+            }
         }
-        self.workspaces.insert(name, path);
-        self.save()?;
-        Ok(())
-    }
-
-    /// Remove a workspace from config
-    pub fn remove_workspace(&mut self, name: &str) -> Result<Option<PathBuf>> {
-        let path = self.workspaces.shift_remove(name);
-        if path.is_some() {
-            self.save()?;
-        }
-        Ok(path)
+        
+        workspaces
     }
 
     /// Get host root by alias
@@ -237,56 +245,11 @@ impl GlobalConfig {
         self.workspace_root.join(name)
     }
 
-    /// Expand workspace root with home directory
-    pub fn expanded_workspace_root(&self) -> PathBuf {
-        shellexpand::tilde(&self.workspace_root.to_string_lossy())
-            .to_string()
-            .into()
-    }
 }
 
-/// Per-workspace configuration (stored in .wtp/config.toml)
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct WorkspaceConfig {
-    /// Override default host for this workspace
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_host: Option<String>,
-
-    /// Additional host mappings specific to this workspace
-    #[serde(default)]
-    pub hosts: HashMap<String, HostConfig>,
-}
-
-impl WorkspaceConfig {
-    /// Load workspace config from a workspace root
-    pub fn load(workspace_root: &Path) -> Result<Self> {
-        let config_path = workspace_root.join(WTP_DIR).join("config.toml");
-        if !config_path.exists() {
-            return Ok(Self::default());
-        }
-        let content = std::fs::read_to_string(&config_path)?;
-        let config: Self = toml::from_str(&content)?;
-        Ok(config)
+impl LoadedConfig {
+    /// Scan all workspaces (delegates to config)
+    pub fn scan_workspaces(&self) -> HashMap<String, PathBuf> {
+        self.config.scan_workspaces()
     }
-
-    /// Save workspace config
-    pub fn save(&self, workspace_root: &Path) -> Result<()> {
-        let config_dir = workspace_root.join(WTP_DIR);
-        std::fs::create_dir_all(&config_dir)?;
-        let config_path = config_dir.join("config.toml");
-        let content = toml::to_string_pretty(self)?;
-        std::fs::write(&config_path, content)?;
-        Ok(())
-    }
-}
-
-/// Find all existing config files and their paths
-pub fn find_all_config_files() -> Vec<(PathBuf, bool)> {
-    GlobalConfig::config_paths()
-        .into_iter()
-        .map(|p| {
-            let exists = p.exists();
-            (p, exists)
-        })
-        .collect()
 }

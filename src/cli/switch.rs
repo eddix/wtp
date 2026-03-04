@@ -6,6 +6,7 @@
 use clap::Args;
 use colored::Colorize;
 
+use super::fuzzy;
 use crate::core::{
     fence::Fence, GitClient, RepoRef, WorktreeEntry, WorktreeManager, WorkspaceManager,
 };
@@ -13,7 +14,7 @@ use crate::core::{
 #[derive(Args, Debug)]
 pub struct SwitchArgs {
     /// Name of the workspace to switch to
-    pub workspace_name: String,
+    pub workspace_name: Option<String>,
 
     /// Create the workspace if it doesn't exist
     #[arg(short, long)]
@@ -51,11 +52,15 @@ pub async fn execute(
         current_repo_root.display().to_string().cyan()
     );
 
+    let workspace_name = match args.workspace_name {
+        Some(name) => name,
+        None => fuzzy::resolve_workspace_interactively(&manager, "wtp switch")?,
+    };
+
     // Get or create target workspace
     let target_workspace_path = if let Some(path) = manager
         .global_config()
-        .get_workspace_path(&args.workspace_name)
-        .cloned()
+        .get_workspace_path(&workspace_name)
     {
         // Workspace exists in config
         if !path.exists() {
@@ -64,14 +69,14 @@ pub async fn execute(
                 println!(
                     "{} Workspace '{}' exists in config but directory is missing. Recreating...",
                     "ℹ".yellow(),
-                    args.workspace_name
+                    workspace_name
                 );
-                manager.create_workspace(&args.workspace_name, true).await?;
+                manager.create_workspace(&workspace_name, true).await?;
             } else {
                 anyhow::bail!(
                     "Workspace '{}' directory does not exist at {}. \
                     Use --create to recreate it.",
-                    args.workspace_name,
+                    workspace_name,
                     path.display()
                 );
             }
@@ -84,17 +89,17 @@ pub async fn execute(
             println!(
                 "{} Creating new workspace '{}'...",
                 "ℹ".yellow(),
-                args.workspace_name.cyan()
+                workspace_name.cyan()
             );
-            manager.create_workspace(&args.workspace_name, true).await?
+            manager.create_workspace(&workspace_name, true).await?
         } else {
             anyhow::bail!(
                 "Workspace '{}' does not exist. \
                 Create it with: wtp create {}\n\
                 Or use: wtp switch --create {}",
-                args.workspace_name,
-                args.workspace_name,
-                args.workspace_name
+                workspace_name,
+                workspace_name,
+                workspace_name
             );
         }
     };
@@ -102,13 +107,13 @@ pub async fn execute(
     if !target_workspace_path.join(".wtp").exists() {
         anyhow::bail!(
             "Workspace '{}' is missing its .wtp directory. It may be corrupted.",
-            args.workspace_name
+            workspace_name
         );
     }
 
     println!(
         "Target workspace: {} at {}",
-        args.workspace_name.cyan(),
+        workspace_name.cyan(),
         target_workspace_path.display().to_string().dimmed()
     );
 
@@ -118,7 +123,7 @@ pub async fn execute(
         eprintln!(
             "{} Warning: Workspace '{}' is outside workspace_root: {}",
             "⚠️".yellow(),
-            args.workspace_name.yellow(),
+            workspace_name.yellow(),
             fence.boundary().display()
         );
         eprintln!(
@@ -158,7 +163,7 @@ pub async fn execute(
     };
 
     // Determine branch name
-    let branch = args.branch.unwrap_or_else(|| args.workspace_name.clone());
+    let branch = args.branch.unwrap_or_else(|| workspace_name.clone());
 
     // Determine base reference
     let base = args.base.unwrap_or_else(|| {
@@ -244,7 +249,7 @@ pub async fn execute(
             .unwrap_or_default()
             .to_string_lossy()
             .cyan(),
-        args.workspace_name.cyan()
+        workspace_name.cyan()
     );
     println!();
     println!(

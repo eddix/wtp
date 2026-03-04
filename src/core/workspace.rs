@@ -1,44 +1,48 @@
 //! Workspace management
 
-use crate::core::config::{GlobalConfig, WTP_DIR};
+use crate::core::config::{GlobalConfig, LoadedConfig, WTP_DIR};
 use crate::core::error::{Result, WtpError};
 use crate::core::fence::Fence;
-use crate::core::worktree::{RepoRef, WorktreeManager};
+use crate::core::worktree::WorktreeManager;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 /// Manages workspaces and their discovery
 pub struct WorkspaceManager {
-    global_config: GlobalConfig,
+    loaded_config: LoadedConfig,
 }
 
 impl WorkspaceManager {
-    pub fn new(global_config: GlobalConfig) -> Self {
-        Self { global_config }
+    pub fn new(loaded_config: LoadedConfig) -> Self {
+        Self { loaded_config }
     }
 
     /// Get a reference to the global config
     pub fn global_config(&self) -> &GlobalConfig {
-        &self.global_config
+        &self.loaded_config.config
     }
 
     /// Get a mutable reference to the global config
     pub fn global_config_mut(&mut self) -> &mut GlobalConfig {
-        &mut self.global_config
+        &mut self.loaded_config.config
+    }
+
+    /// Get a reference to the loaded config (includes source path)
+    pub fn loaded_config(&self) -> &LoadedConfig {
+        &self.loaded_config
     }
 
     /// List all workspaces
     pub fn list_workspaces(&self) -> Vec<WorkspaceInfo> {
-        self.global_config
-            .workspaces
-            .iter()
+        self.loaded_config
+            .scan_workspaces()
+            .into_iter()
             .map(|(name, path)| {
-                let exists = path.exists();
                 WorkspaceInfo {
-                    name: name.clone(),
-                    path: path.clone(),
-                    exists,
+                    name,
+                    path,
+                    exists: true, // Scanned workspaces always exist
                 }
             })
             .collect()
@@ -46,30 +50,27 @@ impl WorkspaceManager {
 
     /// Create a new workspace
     pub async fn create_workspace(&mut self, name: &str, run_hook: bool) -> Result<PathBuf> {
-        // Check if workspace already exists in config
-        if self.global_config.has_workspace(name) {
-            return Err(WtpError::WorkspaceAlreadyExists {
-                name: name.to_string(),
-                path: self.global_config.get_workspace_path(name).unwrap().clone(),
-            });
-        }
+        let workspace_path = self.global_config().resolve_workspace_path(name);
 
-        let workspace_path = self.global_config.resolve_workspace_path(name);
-
-        // Check if directory already exists
-        if workspace_path.exists() {
+        // Check if workspace already exists (directory with .wtp subdirectory)
+        if workspace_path.join(WTP_DIR).exists() {
             return Err(WtpError::WorkspaceAlreadyExists {
                 name: name.to_string(),
                 path: workspace_path.clone(),
             });
         }
 
-        // Create workspace directory structure with fence protection
-        let fence = Fence::from_config(&self.global_config);
-        self.initialize_workspace_dir(&workspace_path, &fence)?;
+        // Check if directory exists but is not a workspace (no .wtp subdirectory)
+        if workspace_path.exists() {
+            return Err(WtpError::config(format!(
+                "Directory '{}' already exists but is not a wtp workspace",
+                workspace_path.display()
+            )));
+        }
 
-        // Register in global config
-        self.global_config.add_workspace(name.to_string(), workspace_path.clone())?;
+        // Create workspace directory structure with fence protection
+        let fence = Fence::from_config(&self.loaded_config.config);
+        self.initialize_workspace_dir(&workspace_path, &fence)?;
 
         // Run post-create hook if configured and enabled
         if run_hook {
@@ -83,7 +84,7 @@ impl WorkspaceManager {
 
     /// Run the on_create hook script
     async fn run_create_hook(&self, name: &str, path: &Path) -> Result<()> {
-        let Some(hook_path) = &self.global_config.hooks.on_create else {
+        let Some(hook_path) = &self.loaded_config.config.hooks.on_create else {
             return Ok(());
         };
 
@@ -153,9 +154,9 @@ impl WorkspaceManager {
         Ok(())
     }
 
-    /// Remove a workspace from config
+    /// Remove a workspace
     pub fn remove_workspace(&mut self, name: &str, delete_dir: bool) -> Result<Option<PathBuf>> {
-        let path = self.global_config.remove_workspace(name)?;
+        let path = self.global_config().get_workspace_path(name);
 
         if let Some(ref p) = path {
             if delete_dir && p.exists() {
@@ -174,7 +175,7 @@ impl WorkspaceManager {
                     }
                 }
 
-                crate::core::fence::ensure_fence(&self.global_config).remove_dir_all(p)?;
+                crate::core::fence::ensure_fence(&self.loaded_config.config).remove_dir_all(p)?;
             }
         }
 
@@ -183,7 +184,7 @@ impl WorkspaceManager {
 
     /// Try to match a repository path to a host alias
     pub fn match_host_alias(&self, repo_path: &Path) -> Option<(String, String)> {
-        for (alias, host_config) in &self.global_config.hosts {
+        for (alias, host_config) in &self.global_config().hosts {
             if let Ok(rel) = repo_path.strip_prefix(&host_config.root) {
                 return Some((alias.clone(), rel.to_string_lossy().to_string()));
             }
@@ -193,7 +194,7 @@ impl WorkspaceManager {
 
     /// Get all host aliases
     pub fn get_hosts(&self) -> &HashMap<String, crate::core::config::HostConfig> {
-        &self.global_config.hosts
+        &self.global_config().hosts
     }
 }
 

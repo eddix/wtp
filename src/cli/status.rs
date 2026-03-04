@@ -19,10 +19,6 @@ pub struct StatusArgs {
     /// Show detailed information
     #[arg(short, long)]
     long: bool,
-
-    /// Show dirty status for each worktree (slower)
-    #[arg(short, long)]
-    dirty: bool,
 }
 
 pub async fn execute(args: StatusArgs, manager: WorkspaceManager) -> anyhow::Result<()> {
@@ -34,7 +30,6 @@ pub async fn execute(args: StatusArgs, manager: WorkspaceManager) -> anyhow::Res
         let path = manager
             .global_config()
             .get_workspace_path(&name)
-            .cloned()
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "Workspace '{}' not found. Create it with: wtp create {}",
@@ -79,7 +74,7 @@ pub async fn execute(args: StatusArgs, manager: WorkspaceManager) -> anyhow::Res
         println!("Import a worktree with:");
         println!(
             "  {}",
-            format!("wtp import <repo_path>",).cyan()
+            "wtp import <repo_path>".cyan()
         );
         println!();
         println!("Or switch the current repo to this workspace:");
@@ -88,9 +83,9 @@ pub async fn execute(args: StatusArgs, manager: WorkspaceManager) -> anyhow::Res
     }
 
     if args.long {
-        print_detailed_status(&git, worktrees, &workspace_path, args.dirty).await?;
+        print_detailed_status(&git, worktrees, &workspace_path).await?;
     } else {
-        print_compact_status(&git, worktrees, &workspace_path, args.dirty).await?;
+        print_compact_status(&git, worktrees, &workspace_path).await?;
     }
 
     Ok(())
@@ -108,7 +103,7 @@ fn detect_current_workspace(
         // Check if this directory has a .wtp subdirectory
         if check_dir.join(".wtp").is_dir() {
             // Find which workspace this is
-            for (name, path) in manager.global_config().workspaces.iter() {
+            for (name, path) in manager.global_config().scan_workspaces().iter() {
                 if path == check_dir {
                     return Ok((name.clone(), path.clone()));
                 }
@@ -142,7 +137,6 @@ async fn print_compact_status(
     git: &GitClient,
     worktrees: &[crate::core::WorktreeEntry],
     workspace_path: &std::path::Path,
-    check_dirty: bool,
 ) -> anyhow::Result<()> {
     println!(
         "{:<30} {:<20} {}",
@@ -153,38 +147,32 @@ async fn print_compact_status(
 
     for wt in worktrees {
         let wt_full_path = workspace_path.join(&wt.worktree_path);
-
-        let status = if check_dirty && wt_full_path.exists() {
-            match git.get_status(&wt_full_path) {
-                Ok(s) => s.format_compact(),
-                Err(_) => "?".to_string(),
-            }
-        } else if !wt_full_path.exists() {
-            "missing".red().to_string()
-        } else {
-            "-".dimmed().to_string()
-        };
-
-        let _repo_name = wt.repo.slug();
         let repo_display = wt.repo.display();
+
+        if !wt_full_path.exists() {
+            println!(
+                "{:<30} {:<20} {}",
+                repo_display,
+                wt.branch.cyan(),
+                "missing".red().bold()
+            );
+            continue;
+        }
+
+        let status_str = match git.get_status(&wt_full_path) {
+            Ok(s) => s.format_compact(),
+            Err(_) => "?".to_string(),
+        };
 
         println!(
             "{:<30} {:<20} {}",
             if repo_display.len() > 30 {
-                format!("{}...", &repo_display[..27]).dimmed()
+                format!("{}...", &repo_display[..27])
             } else {
-                repo_display.dimmed()
+                repo_display
             },
             wt.branch.cyan(),
-            status
-        );
-    }
-
-    if !check_dirty {
-        println!();
-        println!(
-            "{}",
-            "Use --dirty to check working directory status (slower)".dimmed()
+            status_str
         );
     }
 
@@ -195,66 +183,101 @@ async fn print_detailed_status(
     git: &GitClient,
     worktrees: &[crate::core::WorktreeEntry],
     workspace_path: &std::path::Path,
-    check_dirty: bool,
 ) -> anyhow::Result<()> {
-    for (i, wt) in worktrees.iter().enumerate() {
-        if i > 0 {
+    let separator = "\u{2500}".repeat(60);
+
+    for wt in worktrees.iter() {
+        let wt_full_path = workspace_path.join(&wt.worktree_path);
+        let repo_display = wt.repo.display();
+
+        println!("{}", separator.dimmed());
+        println!("  {}", repo_display.cyan().bold());
+        println!("{}", separator.dimmed());
+
+        if !wt_full_path.exists() {
+            println!(
+                "  {:<10} {}",
+                "Status:".bold(),
+                "MISSING".red().bold()
+            );
             println!();
+            continue;
         }
 
-        let wt_full_path = workspace_path.join(&wt.worktree_path);
-
-        println!("{}", "─".repeat(60).dimmed());
-        println!("{}: {}", "Repository".bold(), wt.repo.display().cyan());
-        println!("{}: {}", "Branch".bold(), wt.branch.cyan());
+        // Branch
         println!(
-            "{}: {}",
-            "Worktree".bold(),
-            wt.worktree_path.display().to_string().dimmed()
+            "  {:<10} {}",
+            "Branch:".bold(),
+            wt.branch.cyan()
         );
 
-        if let Some(ref base) = wt.base {
-            println!("{}: {}", "Base".bold(), base.dimmed());
+        // HEAD: hash + subject + relative time
+        let head_short = git.get_head_commit(&wt_full_path).unwrap_or_default();
+        let subject = git
+            .get_last_commit_subject(&wt_full_path)
+            .unwrap_or_default();
+        let rel_time = git
+            .get_last_commit_relative_time(&wt_full_path)
+            .unwrap_or_default();
+
+        if !head_short.is_empty() {
+            println!(
+                "  {:<10} {} {} {}",
+                "HEAD:".bold(),
+                head_short.yellow(),
+                subject,
+                format!("({})", rel_time).dimmed()
+            );
         }
 
-        if let Some(ref commit) = wt.head_commit {
-            println!("{}: {}", "HEAD".bold(), &commit[..8].dimmed());
-        }
+        // Status
+        match git.get_status(&wt_full_path) {
+            Ok(status) => {
+                println!(
+                    "  {:<10} {}",
+                    "Status:".bold(),
+                    status.format_detail_status()
+                );
 
-        // Check if worktree exists
-        if wt_full_path.exists() {
-            if check_dirty {
-                match git.get_status(&wt_full_path) {
-                    Ok(status) => {
-                        let status_str = if status.dirty {
-                            "dirty".yellow().to_string()
-                        } else {
-                            "clean".green().to_string()
-                        };
-                        print!("{}: {}", "Status".bold(), status_str);
-
-                        if status.ahead > 0 {
-                            print!(" (ahead +{})", status.ahead);
-                        }
-                        if status.behind > 0 {
-                            print!(" (behind -{})", status.behind);
-                        }
-                        println!();
-                    }
-                    Err(e) => {
-                        println!(
-                            "{}: {}",
-                            "Status".bold(),
-                            format!("error: {}", e).red()
-                        );
-                    }
-                }
+                // Remote
+                println!(
+                    "  {:<10} {}",
+                    "Remote:".bold(),
+                    status.format_detail_remote()
+                );
             }
-        } else {
-            println!("{}: {}", "Status".bold(), "MISSING".red().bold());
+            Err(e) => {
+                println!(
+                    "  {:<10} {}",
+                    "Status:".bold(),
+                    format!("error: {}", e).red()
+                );
+            }
         }
+
+        // Stash
+        match git.get_stash_count(&wt_full_path) {
+            Ok(count) if count > 0 => {
+                let entry_word = if count == 1 { "entry" } else { "entries" };
+                println!(
+                    "  {:<10} {}",
+                    "Stash:".bold(),
+                    format!("{} {}", count, entry_word).yellow()
+                );
+            }
+            Ok(_) => {
+                println!(
+                    "  {:<10} {}",
+                    "Stash:".bold(),
+                    "none".dimmed()
+                );
+            }
+            Err(_) => {}
+        }
+
+        println!();
     }
-    println!("{}", "─".repeat(60).dimmed());
+    println!("{}", separator.dimmed());
 
     Ok(())
 }

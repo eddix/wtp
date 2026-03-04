@@ -16,20 +16,11 @@ pub enum WtpError {
     #[error("Git error: {0}")]
     Git(String),
 
-    #[error("Workspace not found: {name}")]
-    WorkspaceNotFound { name: String },
-
     #[error("Workspace already exists: {name} at {path}")]
     WorkspaceAlreadyExists { name: String, path: PathBuf },
 
-    #[error("Not in a workspace: {message}")]
-    NotInWorkspace { message: String },
-
     #[error("Not in a git repository")]
     NotInGitRepo,
-
-    #[error("Repository not found: {path}")]
-    RepoNotFound { path: PathBuf },
 
     #[error("Branch '{branch}' is already checked out in another worktree: {worktree_path}")]
     BranchAlreadyCheckedOut { branch: String, worktree_path: PathBuf },
@@ -37,20 +28,11 @@ pub enum WtpError {
     #[error("Worktree already exists: {path}")]
     WorktreeAlreadyExists { path: PathBuf },
 
-    #[error("Host alias not found: {alias}")]
-    HostNotFound { alias: String },
-
-    #[error("Parse error: {0}")]
-    Parse(String),
-
     #[error("Serialization error: {0}")]
     Serialization(#[from] toml::ser::Error),
 
     #[error("Deserialization error: {0}")]
     Deserialization(#[from] toml::de::Error),
-
-    #[error("Multiple config files found: {files}. Using {used}")]
-    MultipleConfigFiles { files: String, used: PathBuf },
 }
 
 impl WtpError {
@@ -60,9 +42,5 @@ impl WtpError {
 
     pub fn git(msg: impl Into<String>) -> Self {
         Self::Git(msg.into())
-    }
-
-    pub fn parse(msg: impl Into<String>) -> Self {
-        Self::Parse(msg.into())
     }
 }

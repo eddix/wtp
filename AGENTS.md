@@ -94,7 +94,6 @@ Commands are grouped visually in help output but kept flat (not nested).
 ```rust
 pub struct GlobalConfig {
     pub workspace_root: PathBuf,           // default: ~/.wtp/workspaces
-    pub workspaces: IndexMap<String, PathBuf>, // name -> path mapping
     pub hosts: HashMap<String, HostConfig>,
     pub default_host: Option<String>,
     pub hooks: HooksConfig,                // on_create hook path
