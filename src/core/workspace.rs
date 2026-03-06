@@ -3,7 +3,6 @@
 use crate::core::config::{GlobalConfig, LoadedConfig, WTP_DIR};
 use crate::core::error::{Result, WtpError};
 use crate::core::fence::Fence;
-use crate::core::worktree::WorktreeManager;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -154,27 +153,13 @@ impl WorkspaceManager {
         Ok(())
     }
 
-    /// Remove a workspace
+    /// Remove a workspace directory.
+    /// Caller is responsible for ejecting worktrees before calling this.
     pub fn remove_workspace(&mut self, name: &str, delete_dir: bool) -> Result<Option<PathBuf>> {
         let path = self.global_config().get_workspace_path(name);
 
         if let Some(ref p) = path {
             if delete_dir && p.exists() {
-                // Check for existing worktrees
-                let worktree_toml_path = p.join(WTP_DIR).join("worktree.toml");
-                if worktree_toml_path.exists() {
-                    let worktrees = WorktreeManager::load(p)?;
-                    if !worktrees.list_worktrees().is_empty() {
-                        return Err(WtpError::config(format!(
-                            "Workspace '{}' still has {} worktrees. \
-                            Remove them first with 'wtp rm --delete-dir', \
-                            or manually clean up the worktrees.",
-                            name,
-                            worktrees.list_worktrees().len()
-                        )));
-                    }
-                }
-
                 crate::core::fence::ensure_fence(&self.loaded_config.config).remove_dir_all(p)?;
             }
         }

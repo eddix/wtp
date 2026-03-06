@@ -155,7 +155,7 @@ fn test_ls_short_format() {
     assert!(stdout.contains("test-short"), "Expected 'test-short' in output, got: {}", stdout);
     
     // Cleanup
-    let _ = run_wtp_with_home(&["rm", "test-short", "--delete-dir", "--force"], temp_home.path());
+    let _ = run_wtp_with_home(&["rm", "test-short", "--force"], temp_home.path());
 }
 
 #[test]
@@ -216,7 +216,7 @@ on_create = "{}"
     assert!(marker_file.exists(), "Hook marker file should exist");
     
     // Cleanup
-    let _ = run_wtp_with_home(&["rm", "test-hook-ws", "--delete-dir", "--force"], home_path);
+    let _ = run_wtp_with_home(&["rm", "test-hook-ws", "--force"], home_path);
 }
 
 #[test]
@@ -272,7 +272,7 @@ on_create = "{}"
             "Hook should not have run, but output contains hook text: {}", stdout);
     
     // Cleanup
-    let _ = run_wtp_with_home(&["rm", "test-no-hook-ws", "--delete-dir", "--force"], home_path);
+    let _ = run_wtp_with_home(&["rm", "test-no-hook-ws", "--force"], home_path);
 }
 
 #[test]

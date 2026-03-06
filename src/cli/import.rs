@@ -120,10 +120,13 @@ pub async fn execute(args: ImportArgs, manager: WorkspaceManager) -> anyhow::Res
     }
 
     let repo_root = git.get_repo_root(Some(&repo_path))?;
+    let is_bare = git.is_bare_repo(&repo_root);
+
     println!(
-        "Repository: {} at {}",
+        "Repository: {} at {}{}",
         repo_ref.display().cyan(),
-        repo_root.display().to_string().dimmed()
+        repo_root.display().to_string().dimmed(),
+        if is_bare { " (bare)".dimmed().to_string() } else { String::new() }
     );
 
     // Determine branch name
@@ -131,7 +134,8 @@ pub async fn execute(args: ImportArgs, manager: WorkspaceManager) -> anyhow::Res
 
     // Determine base reference
     let base = args.base.unwrap_or_else(|| {
-        // Default to current HEAD
+        // For bare repos, try to read the symbolic HEAD (e.g., main/master)
+        // For normal repos, use the current branch
         git.get_current_branch(&repo_root)
             .unwrap_or_else(|_| "HEAD".to_string())
     });

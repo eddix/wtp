@@ -25,24 +25,64 @@ impl GitClient {
         }
     }
 
-    /// Get the root directory of a git repository
+    /// Get the root directory of a git repository (supports both normal and bare repos).
+    ///
+    /// For normal repos: returns the work tree root (same as `--show-toplevel`).
+    /// For bare repos: returns the git directory itself (the `.git`-less directory).
     pub fn get_repo_root(&self, cwd: Option<&Path>) -> Result<PathBuf> {
-        let mut cmd = Command::new("git");
-        cmd.arg("rev-parse").arg("--show-toplevel");
-        if let Some(dir) = cwd {
-            cmd.current_dir(dir);
+        let resolve_dir = |args: &[&str]| -> std::result::Result<String, WtpError> {
+            let mut cmd = Command::new("git");
+            for arg in args {
+                cmd.arg(arg);
+            }
+            if let Some(dir) = cwd {
+                cmd.current_dir(dir);
+            }
+            let output = cmd.output()?;
+            if !output.status.success() {
+                return Err(WtpError::NotInGitRepo);
+            }
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        };
+
+        // Try --show-toplevel first (works for normal repos)
+        if let Ok(toplevel) = resolve_dir(&["rev-parse", "--show-toplevel"]) {
+            return Ok(PathBuf::from(toplevel));
         }
 
-        let output = cmd.output()?;
-        if !output.status.success() {
-            return Err(WtpError::NotInGitRepo);
+        // Fall back to bare repo detection
+        let is_bare = resolve_dir(&["rev-parse", "--is-bare-repository"])
+            .map(|s| s == "true")
+            .unwrap_or(false);
+
+        if is_bare {
+            // --git-dir returns "." for bare repos when cwd is the repo itself
+            let git_dir = resolve_dir(&["rev-parse", "--git-dir"])?;
+            let git_path = PathBuf::from(&git_dir);
+            if git_path.is_absolute() {
+                return Ok(git_path);
+            }
+            // Resolve relative path against cwd
+            if let Some(dir) = cwd {
+                return Ok(dir.join(git_path).canonicalize().map_err(|_| WtpError::NotInGitRepo)?);
+            }
         }
 
-        let path = String::from_utf8_lossy(&output.stdout);
-        Ok(PathBuf::from(path.trim()))
+        Err(WtpError::NotInGitRepo)
     }
 
-    /// Check if a directory is inside a git repository
+    /// Check if a path is a bare git repository
+    pub fn is_bare_repo(&self, path: &Path) -> bool {
+        let output = Command::new("git")
+            .current_dir(path)
+            .arg("rev-parse")
+            .arg("--is-bare-repository")
+            .output();
+        matches!(output, Ok(o) if o.status.success()
+            && String::from_utf8_lossy(&o.stdout).trim() == "true")
+    }
+
+    /// Check if a directory is a git repository (normal or bare)
     pub fn is_in_git_repo(&self, path: &Path) -> bool {
         self.get_repo_root(Some(path)).is_ok()
     }

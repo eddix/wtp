@@ -201,11 +201,6 @@ impl GlobalConfig {
         }
     }
 
-    /// Check if a workspace exists
-    pub fn has_workspace(&self, name: &str) -> bool {
-        self.get_workspace_path(name).is_some()
-    }
-
     /// Scan all workspaces in workspace_root
     /// Returns a map of workspace name to path for all valid workspaces
     pub fn scan_workspaces(&self) -> HashMap<String, PathBuf> {

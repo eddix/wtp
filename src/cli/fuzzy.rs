@@ -195,12 +195,26 @@ pub fn resolve_host_interactively(
     }
 }
 
-/// Scan a directory for git repositories.
+/// Check if a directory looks like a bare git repository.
 ///
-/// Walks the directory tree looking for directories that contain `.git`
-/// (file or directory). Returns paths relative to `root`.
+/// A bare repo has `HEAD`, `objects/`, and `refs/` directly in the directory,
+/// but no `.git` subdirectory.
+fn is_bare_git_repo(path: &Path) -> bool {
+    !path.join(".git").exists()
+        && path.join("HEAD").is_file()
+        && path.join("objects").is_dir()
+        && path.join("refs").is_dir()
+}
+
+/// Scan a directory for git repositories (normal and bare).
 ///
-/// - Skips hidden directories (except `.git` detection)
+/// Walks the directory tree looking for:
+/// - Normal repos: directories that contain `.git` (file or directory)
+/// - Bare repos: directories that contain `HEAD` + `objects/` + `refs/`
+///
+/// Returns paths relative to `root`.
+///
+/// - Skips hidden directories, except those ending with `.git` (bare repo convention)
 /// - Does not follow symlinks
 /// - Limits depth to 4 levels (covers `owner/repo` structure)
 /// - Stops recursing into directories that are themselves git repos
@@ -218,10 +232,10 @@ pub fn scan_git_repos(root: &Path) -> Vec<String> {
     let mut skip_prefixes: Vec<std::path::PathBuf> = Vec::new();
 
     for entry in walker.into_iter().filter_entry(|e| {
-        // Skip hidden directories (but we still check for .git inside)
+        // Skip hidden directories, but allow `.git`-suffixed dirs (bare repos)
         if e.depth() > 0 {
             if let Some(name) = e.file_name().to_str() {
-                if name.starts_with('.') {
+                if name.starts_with('.') && !name.ends_with(".git") {
                     return false;
                 }
             }
@@ -245,9 +259,9 @@ pub fn scan_git_repos(root: &Path) -> Vec<String> {
             continue;
         }
 
-        // Check if this directory contains .git (file or directory)
-        let dot_git = path.join(".git");
-        if dot_git.exists() {
+        // Check for normal repo (.git exists) or bare repo
+        let is_repo = path.join(".git").exists() || is_bare_git_repo(path);
+        if is_repo {
             if let Ok(rel) = path.strip_prefix(root) {
                 let rel_str = rel.to_string_lossy().to_string();
                 if !rel_str.is_empty() {
