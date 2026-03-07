@@ -2,10 +2,10 @@
 name = "wtp"
 version = "0.1.0"
 edition = "2024"
-authors = ["Your Name <you@example.com>"]
+authors = ["eddix <eli.tech.arm@gmail.com>"]
 description = "WorkTree for Polyrepo - Manage multiple git worktrees across repositories"
 license = "MIT"
-repository = "https://github.com/yourusername/wtp"
+repository = "https://github.com/eddix/wtp"
 keywords = ["git", "worktree", "cli", "polyrepo", "workspace"]
 categories = ["command-line-utilities", "development-tools"]
 rust-version = "1.90"
