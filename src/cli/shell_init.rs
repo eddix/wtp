@@ -51,16 +51,5 @@ wtp() {
     
     return $exit_code
 }
-
-# Enable tab completion for wtp cd
-if command -v compdef &> /dev/null; then
-    # zsh
-    _wtp_complete() {
-        local -a workspaces
-        workspaces=(${(f)"$(command wtp ls --short 2>/dev/null)"})
-        _describe 'workspaces' workspaces
-    }
-    compdef _wtp_complete wtp
-fi
 "#.to_string()
 }

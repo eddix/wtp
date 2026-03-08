@@ -64,6 +64,7 @@ fn test_wtp_help() {
     assert!(stdout.contains("switch"));
     assert!(stdout.contains("eject"));
     assert!(stdout.contains("shell-init"));
+    assert!(stdout.contains("completions"));
     assert!(stdout.contains("Workspace Management"));
     assert!(stdout.contains("Repository Operations"));
     assert!(stdout.contains("Utilities"));
@@ -305,4 +306,46 @@ fn test_eject_help() {
     assert!(stdout.contains("Eject"));
     assert!(stdout.contains("Usage:"));
     assert!(stdout.contains("wtp eject"));
+}
+
+#[test]
+fn test_completions_zsh() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let temp_home = setup_test_env();
+
+    let (success, stdout, _) = run_wtp_with_home(&["completions", "zsh"], temp_home.path());
+    assert!(success);
+    assert!(stdout.contains("#compdef wtp"));
+    assert!(stdout.contains("_wtp_workspaces"));
+}
+
+#[test]
+fn test_completions_bash() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let temp_home = setup_test_env();
+
+    let (success, stdout, _) = run_wtp_with_home(&["completions", "bash"], temp_home.path());
+    assert!(success);
+    assert!(stdout.contains("_wtp_completions"));
+    assert!(stdout.contains("complete -F"));
+}
+
+#[test]
+fn test_completions_fish() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let temp_home = setup_test_env();
+
+    let (success, stdout, _) = run_wtp_with_home(&["completions", "fish"], temp_home.path());
+    assert!(success);
+    assert!(stdout.contains("complete -c wtp"));
+}
+
+#[test]
+fn test_completions_invalid_shell() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let temp_home = setup_test_env();
+
+    let (success, _, stderr) = run_wtp_with_home(&["completions", "powershell"], temp_home.path());
+    assert!(!success);
+    assert!(stderr.contains("Unsupported shell"));
 }

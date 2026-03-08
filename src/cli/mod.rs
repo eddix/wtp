@@ -1,6 +1,7 @@
 //! CLI module containing all subcommand implementations
 
 pub mod cd;
+pub mod completions;
 pub mod config;
 pub mod create;
 pub mod eject;
@@ -332,6 +333,9 @@ pub enum Commands {
     /// Generate shell integration script
     #[cmd_group("Utilities")]
     ShellInit(shell_init::ShellInitArgs),
+    /// Generate shell completion scripts
+    #[cmd_group("Utilities")]
+    Completions(completions::CompletionsArgs),
 }
 
 /// Run the CLI
@@ -380,6 +384,7 @@ pub async fn run() -> anyhow::Result<()> {
         Commands::Host(args) => host::execute(args, crate::core::WorkspaceManager::new(loaded_config)).await?,
         Commands::Config(args) => config::execute(args, crate::core::WorkspaceManager::new(loaded_config)).await?,
         Commands::ShellInit(args) => shell_init::execute(args).await?,
+        Commands::Completions(args) => completions::execute(args).await?,
     }
 
     Ok(())

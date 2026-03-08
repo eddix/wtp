@@ -47,12 +47,45 @@ wtp switch feature-x
 # Jump to workspace directory (requires shell integration, see below)
 wtp cd feature-x
 
-# Or import an external repo into the current workspace
-wtp import ~/projects/another-repo
+# Or import a repo while inside a workspace directory
+cd ~/.wtp/workspaces/feature-x
+wtp import company/project
 
 # See all worktrees in the workspace
 wtp status
 ```
+
+## Shell Integration
+
+### Shell Wrapper (`wtp cd`)
+
+To enable `wtp cd`, add the following to your `.zshrc` or `.bashrc`:
+
+```bash
+eval "$(wtp shell-init)"
+```
+
+**How it works:**
+1. The shell wrapper creates a temporary file and sets `WTP_DIRECTIVE_FILE`
+2. `wtp cd` writes a `cd '/path/to/workspace'` command to this file
+3. After wtp exits, the wrapper sources this file, changing the parent shell's directory
+
+### Shell Completions
+
+Generate tab-completion scripts with `wtp completions`:
+
+```bash
+# Zsh (add to .zshrc)
+eval "$(wtp completions zsh)"
+
+# Bash (add to .bashrc)
+eval "$(wtp completions bash)"
+
+# Fish (add to config.fish)
+wtp completions fish | source
+```
+
+Completions include subcommands, flags, workspace names (dynamic), host aliases (dynamic), and file paths where applicable.
 
 ## Configuration
 
@@ -84,11 +117,6 @@ root = "~/codes/bitbucket.org"
 
 # Default host to use when none specified
 default_host = "gh"
-
-# Workspaces are auto-registered, but you can also define them manually
-[workspaces]
-main = "~/.wtp/workspaces/main"
-feature-x = "~/.wtp/workspaces/feature-x"
 ```
 
 ### Hooks
@@ -197,60 +225,58 @@ This command:
 
 If any worktree has uncommitted changes, the command will stop and list them (unless `--force` is used).
 
-### Security Fence
-
-wtp includes a **fence** mechanism that prevents accidental file operations outside the `workspace_root`. If you attempt to:
-- Create a workspace outside `workspace_root`
-- Import/switch to a workspace that's outside the boundary
-
-You'll see a warning like:
-```
-⚠️ Warning: Workspace 'xxx' is outside workspace_root: /Users/you/.wtp/workspaces
-Target path: /some/outside/path
-Are you sure you want to proceed? [y/N]
-```
-
-This protects your system files from accidental modification by wtp commands.
-
 ### `wtp import` - Import a Worktree into the Current Workspace
 
-Import an external git repository into the workspace you're currently in.
+Import an external git repository into the workspace you're currently in. You must `cd` into a workspace directory first. Both normal and bare git repositories are supported.
 
 ```bash
-# Import a repo into the current workspace (when you're in a workspace directory)
+# Import a repo using the default host (if configured)
+cd ~/.wtp/workspaces/feature-x
 wtp import company/project
 
-# Import using default host (if configured)
-wtp import company/project
-
-# Import with explicit workspace
-wtp import company/project --workspace my-feature
-
-# Import with explicit host
-wtp import company/project --host gh
+# Import with explicit host alias
+wtp import company/project -H gh
 
 # Import with full repo path
 wtp import --repo ~/projects/my-repo
 
 # Specify branch name (defaults to workspace name)
-wtp import company/project --branch feature-xyz
+wtp import company/project -b feature-xyz
 
 # Specify base for new branch
-wtp import company/project --base main
+wtp import company/project -B main
+
+# Interactive mode: run with no arguments to fuzzy-select a repo
+wtp import
 ```
 
 **Repository Path Resolution:**
 
 1. If `--repo` is provided: uses the absolute path directly
-2. If `--host` is provided: `<host_root>/<path>`
+2. If `-H` / `--host` is provided: `<host_root>/<path>`
 3. If `default_host` is configured: uses that host
 4. Otherwise: treats as absolute/relative filesystem path
 
 **Workspace Resolution:**
 
-1. If `--workspace` is provided: uses that workspace
-2. If you're in a workspace directory: uses the current workspace
-3. Otherwise: error - must specify workspace or be in one
+The command detects the workspace from your current directory — it walks up the directory tree looking for a `.wtp` directory. If you're not inside a workspace, you'll get an error.
+
+### `wtp eject` - Eject a Worktree from a Workspace
+
+Remove a repository's worktree from the current workspace via `git worktree remove`.
+
+```bash
+# Eject a specific repository (must be inside a workspace directory)
+wtp eject my-repo
+
+# Force eject even if worktree has uncommitted changes
+wtp eject my-repo --force
+
+# Interactive mode: run with no arguments to select from workspace repos
+wtp eject
+```
+
+The command detects the workspace from your current directory. After ejecting, the worktree record is removed from `.wtp/worktree.toml`.
 
 ### `wtp switch <WORKSPACE>` - Switch Current Repo to Workspace
 
@@ -281,6 +307,30 @@ This command:
 - With `--create`: creates workspace if it doesn't exist
 
 **Host Matching:** When recording the worktree, `wtp` tries to match the repository path against configured host aliases to store a relative reference instead of an absolute path.
+
+### `wtp status` - Show Workspace Status
+
+Shows the status of all worktrees in the current workspace. Must be run from within a workspace directory.
+
+```bash
+# Show status of current workspace
+wtp status
+
+# Detailed status (includes remote tracking, last commit info)
+wtp status --long
+```
+
+### `wtp cd <WORKSPACE>` - Change to Workspace Directory
+
+```bash
+# Jump to a workspace directory
+wtp cd my-feature
+```
+
+**Note:** This command requires shell integration. Without it, you'll see:
+```
+Error: wtp cd requires shell integration
+```
 
 ### `wtp host` - Manage Host Aliases
 
@@ -332,59 +382,20 @@ root = "/home/user/codes/gitlab.company.com"
 default_host = "gh"
 ```
 
-### `wtp status` - Show Workspace Status
+### Security Fence
 
-Local command - shows status of the current workspace (if you're in one).
+wtp includes a **fence** mechanism that prevents accidental file operations outside the `workspace_root`. If you attempt to:
+- Create a workspace outside `workspace_root`
+- Import/switch to a workspace that's outside the boundary
 
-```bash
-# Show status of current workspace (when in a workspace directory)
-wtp status
-
-# Show status of specific workspace
-wtp status --workspace my-feature
-
-# Detailed status
-wtp status --long
-
-# Include dirty checks (slower)
-wtp status --dirty
+You'll see a warning like:
+```
+⚠️ Warning: Workspace 'xxx' is outside workspace_root: /Users/you/.wtp/workspaces
+Target path: /some/outside/path
+Are you sure you want to proceed? [y/N]
 ```
 
-**Note:** If not in a workspace directory, use `--workspace <NAME>` to specify.
-
-Output:
-```
-REPOSITORY                BRANCH               STATUS
-my-project                feature-x            clean
-another-project           feature-x            dirty *
-```
-
-### `wtp cd <WORKSPACE>` - Change to Workspace Directory
-
-```bash
-# Jump to a workspace directory
-wtp cd my-feature
-```
-
-**Note:** This command requires shell integration. Without it, you'll see:
-```
-Error: wtp cd requires shell integration
-```
-
-### `wtp shell-init` - Generate Shell Integration
-
-To enable `wtp cd`, add the following to your `.zshrc` or `.bashrc`:
-
-```bash
-eval "$(wtp shell-init)"
-```
-
-Or manually add the wrapper function (see `wtp shell-init` output).
-
-**How it works:**
-1. The shell wrapper creates a temporary file and sets `WTP_DIRECTIVE_FILE`
-2. `wtp cd` writes a `cd '/path/to/workspace'` command to this file
-3. After wtp exits, the wrapper sources this file, changing the parent shell's directory
+This protects your system files from accidental modification by wtp commands.
 
 ## Concepts
 
@@ -435,7 +446,7 @@ wtp import ~/codes/github.com/company/project
 
 You can use:
 ```bash
-wtp import company/project --host gh
+wtp import company/project -H gh
 # or with default_host configured:
 wtp import company/project
 ```
@@ -456,7 +467,7 @@ wtp switch feature-x    # Creates branch "feature-x" from current HEAD
 If a branch already exists and is not checked out elsewhere:
 
 ```bash
-wtp import company/project --branch existing-branch
+wtp import company/project -b existing-branch
 ```
 
 This will check out the existing branch instead of creating a new one.
@@ -472,21 +483,22 @@ Error: Branch 'feature-x' is already checked out in another worktree: my-project
 ```
 
 **Workarounds:**
-1. Use a different branch name: `wtp import ... --branch feature-x-2`
+1. Use a different branch name: `wtp import ... -b feature-x-2`
 2. Remove the existing worktree first
 3. Use a different workspace
 
 ## Troubleshooting
 
-### "Workspace is required"
+### "Not in a workspace directory"
 
-Commands like `wtp import` and `wtp status` require a workspace:
+Commands like `wtp import`, `wtp eject`, and `wtp status` detect the workspace from your current directory:
 
 ```
-Error: Workspace is required. Use --workspace <NAME> to specify the target workspace.
+Error: Not in a workspace directory.
+Run this command from within a workspace directory.
 ```
 
-Use `--workspace <name>` to specify which workspace to operate on.
+`cd` into a workspace directory first.
 
 ### "Branch already checked out"
 
@@ -530,6 +542,7 @@ src/
 ├── cli/                 # CLI subcommands
 │   ├── mod.rs           # CLI entry point and help system
 │   ├── cd.rs
+│   ├── completions.rs   # Shell completion generation
 │   ├── create.rs
 │   ├── eject.rs         # Eject a worktree from workspace
 │   ├── fuzzy.rs         # Fuzzy finder integration
@@ -555,7 +568,7 @@ src/
 
 - [x] Fuzzy finder integration (skim)
 - [x] Worktree cleanup/synchronization commands (`eject`, `rm`)
-- [ ] Shell completions
+- [x] Shell completions (zsh, bash, fish)
 - [ ] Config migration utilities
 
 ## License

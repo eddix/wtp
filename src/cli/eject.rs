@@ -5,8 +5,6 @@
 
 use clap::Args;
 use colored::Colorize;
-use std::env;
-use std::path::PathBuf;
 
 use super::fuzzy;
 use crate::core::{GitClient, WorktreeManager, WorkspaceManager};
@@ -27,7 +25,7 @@ pub async fn execute(args: EjectArgs, manager: WorkspaceManager) -> anyhow::Resu
     git.check_git()?;
 
     // Detect current workspace
-    let (workspace_name, workspace_path) = detect_current_workspace(&manager)?;
+    let (workspace_name, workspace_path) = manager.detect_current_workspace()?;
 
     if !workspace_path.exists() {
         anyhow::bail!(
@@ -126,40 +124,6 @@ pub async fn execute(args: EjectArgs, manager: WorkspaceManager) -> anyhow::Resu
     println!("{} Worktree ejected successfully.", "✓".green().bold());
 
     Ok(())
-}
-
-/// Detect current workspace from current directory
-fn detect_current_workspace(
-    manager: &WorkspaceManager,
-) -> anyhow::Result<(String, PathBuf)> {
-    let current_dir = env::current_dir()?;
-    let mut check_dir = current_dir.as_path();
-
-    loop {
-        if check_dir.join(".wtp").is_dir() {
-            for (name, path) in manager.global_config().scan_workspaces().iter() {
-                if path == check_dir {
-                    return Ok((name.clone(), path.clone()));
-                }
-            }
-            let name = check_dir
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("workspace")
-                .to_string();
-            return Ok((name, check_dir.to_path_buf()));
-        }
-
-        match check_dir.parent() {
-            Some(parent) => check_dir = parent,
-            None => break,
-        }
-    }
-
-    anyhow::bail!(
-        "Not in a workspace directory.\n\
-         Run this command from within a workspace directory."
-    )
 }
 
 /// Select a worktree interactively from the list
