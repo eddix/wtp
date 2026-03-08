@@ -22,6 +22,9 @@ pub enum WtpError {
     #[error("Not in a git repository")]
     NotInGitRepo,
 
+    #[error("Not in a workspace directory.\nRun this command from within a workspace directory.")]
+    NotInWorkspace,
+
     #[error("Branch '{branch}' is already checked out in another worktree: {worktree_path}")]
     BranchAlreadyCheckedOut { branch: String, worktree_path: PathBuf },
 

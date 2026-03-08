@@ -181,6 +181,40 @@ impl WorkspaceManager {
     pub fn get_hosts(&self) -> &HashMap<String, crate::core::config::HostConfig> {
         &self.global_config().hosts
     }
+
+    /// Detect the current workspace from the working directory.
+    ///
+    /// Walks up from `cwd` looking for a `.wtp` directory, then matches it
+    /// against registered workspaces. Returns `(name, path)`.
+    pub fn detect_current_workspace(&self) -> Result<(String, PathBuf)> {
+        let current_dir = std::env::current_dir()?;
+        let mut check_dir = current_dir.as_path();
+
+        loop {
+            if check_dir.join(WTP_DIR).is_dir() {
+                // Try to match against registered workspaces
+                for (name, path) in self.loaded_config.scan_workspaces().iter() {
+                    if path == check_dir {
+                        return Ok((name.clone(), path.clone()));
+                    }
+                }
+                // Directory has .wtp but is not registered — use dir name
+                let name = check_dir
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("workspace")
+                    .to_string();
+                return Ok((name, check_dir.to_path_buf()));
+            }
+
+            match check_dir.parent() {
+                Some(parent) => check_dir = parent,
+                None => break,
+            }
+        }
+
+        Err(WtpError::NotInWorkspace)
+    }
 }
 
 /// Information about a workspace

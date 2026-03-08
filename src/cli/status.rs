@@ -1,21 +1,14 @@
 //! Status command - Show worktree status
 //!
-//! This is a local command - it works on the current workspace if you're in one,
-//! or requires --workspace to specify which workspace to show.
+//! This is a local command - shows status of the current workspace.
 
 use clap::Args;
 use colored::Colorize;
-use std::env;
-use std::path::PathBuf;
 
 use crate::core::{GitClient, WorktreeManager, WorkspaceManager};
 
 #[derive(Args, Debug)]
 pub struct StatusArgs {
-    /// Workspace to show status for (defaults to current workspace if in one)
-    #[arg(short, long, value_name = "NAME")]
-    workspace: Option<String>,
-
     /// Show detailed information
     #[arg(short, long)]
     long: bool,
@@ -24,23 +17,8 @@ pub struct StatusArgs {
 pub async fn execute(args: StatusArgs, manager: WorkspaceManager) -> anyhow::Result<()> {
     let git = GitClient::new();
 
-    // Determine target workspace
-    let (workspace_name, workspace_path) = if let Some(name) = args.workspace {
-        // Use explicitly specified workspace
-        let path = manager
-            .global_config()
-            .get_workspace_path(&name)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Workspace '{}' not found. Create it with: wtp create {}",
-                    name, name
-                )
-            })?;
-        (name, path)
-    } else {
-        // Try to detect current workspace from current directory
-        detect_current_workspace(&manager)?
-    };
+    // Detect current workspace from current directory
+    let (workspace_name, workspace_path) = manager.detect_current_workspace()?;
 
     if !workspace_path.exists() {
         anyhow::bail!(
@@ -89,48 +67,6 @@ pub async fn execute(args: StatusArgs, manager: WorkspaceManager) -> anyhow::Res
     }
 
     Ok(())
-}
-
-/// Detect current workspace from current directory
-/// Returns (workspace_name, workspace_path) if found
-fn detect_current_workspace(
-    manager: &WorkspaceManager,
-) -> anyhow::Result<(String, PathBuf)> {
-    let current_dir = env::current_dir()?;
-    let mut check_dir = current_dir.as_path();
-
-    loop {
-        // Check if this directory has a .wtp subdirectory
-        if check_dir.join(".wtp").is_dir() {
-            // Find which workspace this is
-            for (name, path) in manager.global_config().scan_workspaces().iter() {
-                if path == check_dir {
-                    return Ok((name.clone(), path.clone()));
-                }
-            }
-            // Directory has .wtp but not registered - might be an orphan
-            // Return with the directory name as workspace name
-            let name = check_dir
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("workspace")
-                .to_string();
-            return Ok((name, check_dir.to_path_buf()));
-        }
-
-        // Move up
-        match check_dir.parent() {
-            Some(parent) => check_dir = parent,
-            None => break,
-        }
-    }
-
-    // Not in any workspace
-    anyhow::bail!(
-        "Not in a workspace. Either:\n\
-         1. Run this command from within a workspace directory, or\n\
-         2. Use --workspace <NAME> to specify the workspace"
-    )
 }
 
 async fn print_compact_status(

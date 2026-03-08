@@ -88,22 +88,23 @@ _wtp() {
                 status)
                     _arguments \
                         '-l[Show detailed information]' \
-                        '--long[Show detailed information]' \
-                        '-w[Workspace name]:workspace:_wtp_workspaces' \
-                        '--workspace[Workspace name]:workspace:_wtp_workspaces'
+                        '--long[Show detailed information]'
                     ;;
                 eject)
                     _arguments \
                         '-f[Force eject]' \
                         '--force[Force eject]' \
-                        '-w[Workspace name]:workspace:_wtp_workspaces' \
-                        '--workspace[Workspace name]:workspace:_wtp_workspaces' \
                         '1:repository:'
                     ;;
                 import)
                     _arguments \
-                        '-w[Workspace name]:workspace:_wtp_workspaces' \
-                        '--workspace[Workspace name]:workspace:_wtp_workspaces' \
+                        '-H[Host alias]:alias:_wtp_hosts' \
+                        '--host[Host alias]:alias:_wtp_hosts' \
+                        '-b[Branch name]:branch:' \
+                        '--branch[Branch name]:branch:' \
+                        '-B[Base reference]:base:' \
+                        '--base[Base reference]:base:' \
+                        '--repo[Full repository path]:path:_files -/' \
                         '1:path:_files -/'
                     ;;
                 switch)
@@ -188,29 +189,19 @@ _wtp_completions() {
             ;;
         status)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "-l --long -w --workspace" -- "$cur"))
-            elif [[ "$prev" == "-w" || "$prev" == "--workspace" ]]; then
-                local workspaces
-                workspaces="$(command wtp ls --short 2>/dev/null)"
-                COMPREPLY=($(compgen -W "$workspaces" -- "$cur"))
+                COMPREPLY=($(compgen -W "-l --long" -- "$cur"))
             fi
             ;;
         eject)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "-f --force -w --workspace" -- "$cur"))
-            elif [[ "$prev" == "-w" || "$prev" == "--workspace" ]]; then
-                local workspaces
-                workspaces="$(command wtp ls --short 2>/dev/null)"
-                COMPREPLY=($(compgen -W "$workspaces" -- "$cur"))
+                COMPREPLY=($(compgen -W "-f --force" -- "$cur"))
             fi
             ;;
         import)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "-w --workspace" -- "$cur"))
-            elif [[ "$prev" == "-w" || "$prev" == "--workspace" ]]; then
-                local workspaces
-                workspaces="$(command wtp ls --short 2>/dev/null)"
-                COMPREPLY=($(compgen -W "$workspaces" -- "$cur"))
+                COMPREPLY=($(compgen -W "-H --host -b --branch -B --base --repo" -- "$cur"))
+            elif [[ "$prev" == "--repo" ]]; then
+                _filedir -d
             else
                 _filedir -d
             fi
@@ -301,14 +292,15 @@ complete -c wtp -n '__fish_seen_subcommand_from remove' -a '(command wtp ls --sh
 
 # status
 complete -c wtp -n '__fish_seen_subcommand_from status' -s l -l long -d 'Show detailed information'
-complete -c wtp -n '__fish_seen_subcommand_from status' -s w -l workspace -d 'Workspace name' -r -a '(command wtp ls --short 2>/dev/null)'
 
 # eject
 complete -c wtp -n '__fish_seen_subcommand_from eject' -s f -l force -d 'Force eject'
-complete -c wtp -n '__fish_seen_subcommand_from eject' -s w -l workspace -d 'Workspace name' -r -a '(command wtp ls --short 2>/dev/null)'
 
 # import
-complete -c wtp -n '__fish_seen_subcommand_from import' -s w -l workspace -d 'Workspace name' -r -a '(command wtp ls --short 2>/dev/null)'
+complete -c wtp -n '__fish_seen_subcommand_from import' -s H -l host -d 'Host alias' -r
+complete -c wtp -n '__fish_seen_subcommand_from import' -s b -l branch -d 'Branch name' -r
+complete -c wtp -n '__fish_seen_subcommand_from import' -s B -l base -d 'Base reference' -r
+complete -c wtp -n '__fish_seen_subcommand_from import' -l repo -d 'Full repository path' -r -F
 complete -c wtp -n '__fish_seen_subcommand_from import' -F
 
 # switch

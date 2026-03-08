@@ -310,20 +310,15 @@ This command:
 
 ### `wtp status` - Show Workspace Status
 
-Shows the status of all worktrees in the current workspace.
+Shows the status of all worktrees in the current workspace. Must be run from within a workspace directory.
 
 ```bash
-# Show status of current workspace (when in a workspace directory)
+# Show status of current workspace
 wtp status
-
-# Show status of specific workspace
-wtp status --workspace my-feature
 
 # Detailed status (includes remote tracking, last commit info)
 wtp status --long
 ```
-
-**Note:** If not in a workspace directory, use `--workspace <NAME>` to specify.
 
 ### `wtp cd <WORKSPACE>` - Change to Workspace Directory
 
@@ -503,7 +498,7 @@ Error: Not in a workspace directory.
 Run this command from within a workspace directory.
 ```
 
-Either `cd` into a workspace directory, or for `wtp status` you can use `--workspace <name>`.
+`cd` into a workspace directory first.
 
 ### "Branch already checked out"
 
