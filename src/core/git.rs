@@ -163,11 +163,6 @@ impl GitClient {
         branch: &str,
         base: &str,
     ) -> Result<()> {
-        // Ensure parent directory exists
-        if let Some(parent) = worktree_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
         let output = Command::new("git")
             .current_dir(repo_path)
             .arg("worktree")
@@ -208,11 +203,6 @@ impl GitClient {
         worktree_path: &Path,
         branch: &str,
     ) -> Result<()> {
-        // Ensure parent directory exists
-        if let Some(parent) = worktree_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
         let output = Command::new("git")
             .current_dir(repo_path)
             .arg("worktree")
@@ -268,22 +258,21 @@ impl GitClient {
 
         for line in output_str.lines() {
             if line.starts_with("## ") {
-                // Parse branch info
-                if let Some(ab) = line.find("[ahead ") {
-                    let start = ab + 7;
-                    if let Some(end) = line[start..].find(']') {
-                        let ahead_str = &line[start..start + end];
-                        ahead = ahead_str
-                            .split(',')
-                            .next()
-                            .and_then(|s| s.trim().parse().ok())
-                            .unwrap_or(0);
+                // Parse branch tracking info from bracketed section, e.g.:
+                // ## main...origin/main [ahead 3, behind 2]
+                if let Some(bracket_start) = line.rfind('[') {
+                    let bracket_section = &line[bracket_start..];
+                    if let Some(ab) = bracket_section.find("ahead ") {
+                        let start = ab + 6;
+                        let rest = &bracket_section[start..];
+                        let num_str = rest.split(|c: char| !c.is_ascii_digit()).next().unwrap_or("");
+                        ahead = num_str.parse().unwrap_or(0);
                     }
-                }
-                if let Some(bb) = line.find("behind ") {
-                    let start = bb + 7;
-                    if let Some(end) = line[start..].find(']') {
-                        behind = line[start..start + end].trim().parse().unwrap_or(0);
+                    if let Some(bb) = bracket_section.find("behind ") {
+                        let start = bb + 7;
+                        let rest = &bracket_section[start..];
+                        let num_str = rest.split(|c: char| !c.is_ascii_digit()).next().unwrap_or("");
+                        behind = num_str.parse().unwrap_or(0);
                     }
                 }
             } else if !line.is_empty() && line.len() >= 2 {

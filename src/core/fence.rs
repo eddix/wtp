@@ -5,7 +5,22 @@
 
 use crate::core::error::{Result, WtpError};
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+
+/// Lexically normalize a path by resolving `.` and `..` without touching the filesystem.
+fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
 
 /// Security fence for file operations
 pub struct Fence {
@@ -48,28 +63,27 @@ impl Fence {
                 || canonical_path.starts_with(&canonical_boundary);
         }
 
-        // Path doesn't exist - need to check if it's within boundary
-        // Handle the case where path is absolute but boundary has symlinks (e.g., /var -> /private/var on macOS)
+        // Path doesn't exist — lexically normalize to catch ".." traversal
         let candidate = if path.is_absolute() {
-            // Check if path starts with the non-canonical boundary
             if let Ok(rel_path) = path.strip_prefix(&self.boundary) {
-                // Path is within boundary - use canonical boundary as base
                 canonical_boundary.join(rel_path)
             } else {
-                // Path is outside boundary
                 path.to_path_buf()
             }
         } else {
             canonical_boundary.join(path)
         };
 
-        candidate == canonical_boundary || candidate.starts_with(&canonical_boundary)
+        let normalized = lexical_normalize(&candidate);
+        normalized == canonical_boundary || normalized.starts_with(&canonical_boundary)
     }
 
-    /// Check path and prompt if outside boundary
-    fn check_path(&self, path: &Path, operation: &str) -> Result<()> {
+    /// Check path and prompt if outside boundary.
+    /// Returns `true` if the path is within the boundary, `false` if the user
+    /// approved an out-of-boundary override. Errors if denied.
+    fn check_path(&self, path: &Path, operation: &str) -> Result<bool> {
         if self.is_within_boundary(path) {
-            return Ok(());
+            return Ok(true);
         }
 
         // Outside boundary - need confirmation
@@ -105,27 +119,67 @@ impl Fence {
             )));
         }
 
-        Ok(())
+        Ok(false)
     }
 
     /// Create directory and all parent directories
     pub fn create_dir_all(&self, path: &Path) -> Result<()> {
-        self.check_path(path, "create directory")?;
+        let within = self.check_path(path, "create directory")?;
         std::fs::create_dir_all(path)?;
+        // Re-verify after creation to catch symlink races (only for in-boundary paths)
+        if within {
+            self.verify_canonical(path, "create directory")?;
+        }
         Ok(())
     }
 
     /// Write content to file
     pub fn write(&self, path: &Path, content: impl AsRef<[u8]>) -> Result<()> {
-        self.check_path(path, "write file")?;
+        let within = self.check_path(path, "write file")?;
+        // Re-verify parent exists and is within boundary (only for in-boundary paths)
+        if within {
+            if let Some(parent) = path.parent() {
+                if parent.exists() {
+                    self.verify_canonical(parent, "write file")?;
+                }
+            }
+        }
         std::fs::write(path, content)?;
         Ok(())
     }
 
     /// Remove directory and all contents
     pub fn remove_dir_all(&self, path: &Path) -> Result<()> {
-        self.check_path(path, "remove directory")?;
+        let within = self.check_path(path, "remove directory")?;
+        // Check for symlinks at the top level to prevent escaping
+        if path.exists() {
+            let metadata = std::fs::symlink_metadata(path)?;
+            if metadata.is_symlink() {
+                return Err(WtpError::config(format!(
+                    "Refusing to recursively remove a symlink: {}",
+                    path.display()
+                )));
+            }
+            if within {
+                self.verify_canonical(path, "remove directory")?;
+            }
+        }
         std::fs::remove_dir_all(path)?;
+        Ok(())
+    }
+
+    /// Re-verify that a path's canonical form is within boundary.
+    /// Called after I/O to mitigate TOCTOU races for in-boundary paths.
+    fn verify_canonical(&self, path: &Path, operation: &str) -> Result<()> {
+        if let Ok(canonical) = path.canonicalize() {
+            if !self.is_within_boundary(&canonical) {
+                return Err(WtpError::config(format!(
+                    "Security: path resolved outside boundary during {}: {}",
+                    operation,
+                    canonical.display()
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -152,7 +206,10 @@ pub fn global_fence() -> Option<&'static Fence> {
 /// Ensure fence is initialized, otherwise use default
 pub fn ensure_fence(config: &crate::core::GlobalConfig) -> Fence {
     match global_fence() {
-        Some(f) => Fence::new(f.boundary().to_path_buf()),
+        Some(f) => Fence {
+            boundary: f.boundary().to_path_buf(),
+            interactive: f.interactive,
+        },
         None => Fence::from_config(config),
     }
 }
@@ -209,5 +266,21 @@ mod tests {
         let outside = PathBuf::from("/tmp/wtp_test_outside.txt");
         let result = fence.write(&outside, b"test");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parent_dir_traversal_blocked() {
+        let temp = tempfile::tempdir().unwrap();
+        let boundary = temp.path().join("ws");
+        std::fs::create_dir_all(&boundary).unwrap();
+        let fence = Fence::new(boundary.clone()).non_interactive();
+
+        // "../escaped" resolves to temp/escaped which is outside ws/
+        let escaped = boundary.join("../escaped");
+        assert!(!fence.is_within_boundary(&escaped));
+
+        let result = fence.create_dir_all(&escaped);
+        assert!(result.is_err(), "create_dir_all should reject '..' traversal");
+        assert!(!temp.path().join("escaped").exists(), "directory should not have been created");
     }
 }

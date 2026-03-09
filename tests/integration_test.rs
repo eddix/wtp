@@ -3,15 +3,9 @@
 use std::process::Command;
 use std::path::PathBuf;
 use tempfile::TempDir;
-use std::sync::Mutex;
-
-// Use a mutex to ensure tests don't run in parallel and interfere with each other
-static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
 fn wtp_bin() -> PathBuf {
-    // Find the compiled binary
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir.join("target/release/wtp")
+    PathBuf::from(env!("CARGO_BIN_EXE_wtp"))
 }
 
 /// Setup a temporary home directory for testing to avoid polluting user's ~/.wtp
@@ -51,7 +45,6 @@ fn run_wtp_in_dir_with_home(
 
 #[test]
 fn test_wtp_help() {
-    let _guard = TEST_MUTEX.lock().unwrap();
     let temp_home = setup_test_env();
     
     let (success, stdout, _) = run_wtp_with_home(&["--help"], temp_home.path());
@@ -73,7 +66,6 @@ fn test_wtp_help() {
 
 #[test]
 fn test_wtp_version() {
-    let _guard = TEST_MUTEX.lock().unwrap();
     let temp_home = setup_test_env();
     
     let (success, stdout, _) = run_wtp_with_home(&["--version"], temp_home.path());
@@ -83,7 +75,6 @@ fn test_wtp_version() {
 
 #[test]
 fn test_import_requires_workspace() {
-    let _guard = TEST_MUTEX.lock().unwrap();
     let temp_home = setup_test_env();
     let temp_dir = TempDir::new().unwrap();
     
@@ -101,7 +92,6 @@ fn test_import_requires_workspace() {
 
 #[test]
 fn test_status_not_in_workspace() {
-    let _guard = TEST_MUTEX.lock().unwrap();
     let temp_home = setup_test_env();
     let temp_dir = TempDir::new().unwrap();
     
@@ -119,7 +109,6 @@ fn test_status_not_in_workspace() {
 
 #[test]
 fn test_cd_requires_shell_integration() {
-    let _guard = TEST_MUTEX.lock().unwrap();
     let temp_home = setup_test_env();
     
     // Use a workspace name that definitely doesn't exist
@@ -133,7 +122,6 @@ fn test_cd_requires_shell_integration() {
 
 #[test]
 fn test_shell_init_outputs_wrapper() {
-    let _guard = TEST_MUTEX.lock().unwrap();
     let temp_home = setup_test_env();
     
     let (success, stdout, _) = run_wtp_with_home(&["shell-init"], temp_home.path());
@@ -144,7 +132,6 @@ fn test_shell_init_outputs_wrapper() {
 
 #[test]
 fn test_ls_short_format() {
-    let _guard = TEST_MUTEX.lock().unwrap();
     let temp_home = setup_test_env();
     
     // First create a workspace in the isolated temp home
@@ -161,7 +148,6 @@ fn test_ls_short_format() {
 
 #[test]
 fn test_create_workspace_with_hook() {
-    let _guard = TEST_MUTEX.lock().unwrap();
     let temp_home = setup_test_env();
     let home_path = temp_home.path();
     
@@ -222,7 +208,6 @@ on_create = "{}"
 
 #[test]
 fn test_create_workspace_skip_hook() {
-    let _guard = TEST_MUTEX.lock().unwrap();
     let temp_home = setup_test_env();
     let home_path = temp_home.path();
     
@@ -278,7 +263,6 @@ on_create = "{}"
 
 #[test]
 fn test_eject_not_in_workspace() {
-    let _guard = TEST_MUTEX.lock().unwrap();
     let temp_home = setup_test_env();
     let temp_dir = TempDir::new().unwrap();
 
@@ -298,7 +282,6 @@ fn test_eject_not_in_workspace() {
 
 #[test]
 fn test_eject_help() {
-    let _guard = TEST_MUTEX.lock().unwrap();
     let temp_home = setup_test_env();
 
     let (success, stdout, _) = run_wtp_with_home(&["help", "eject"], temp_home.path());
@@ -310,7 +293,6 @@ fn test_eject_help() {
 
 #[test]
 fn test_completions_zsh() {
-    let _guard = TEST_MUTEX.lock().unwrap();
     let temp_home = setup_test_env();
 
     let (success, stdout, _) = run_wtp_with_home(&["completions", "zsh"], temp_home.path());
@@ -321,7 +303,6 @@ fn test_completions_zsh() {
 
 #[test]
 fn test_completions_bash() {
-    let _guard = TEST_MUTEX.lock().unwrap();
     let temp_home = setup_test_env();
 
     let (success, stdout, _) = run_wtp_with_home(&["completions", "bash"], temp_home.path());
@@ -332,7 +313,6 @@ fn test_completions_bash() {
 
 #[test]
 fn test_completions_fish() {
-    let _guard = TEST_MUTEX.lock().unwrap();
     let temp_home = setup_test_env();
 
     let (success, stdout, _) = run_wtp_with_home(&["completions", "fish"], temp_home.path());
@@ -342,10 +322,11 @@ fn test_completions_fish() {
 
 #[test]
 fn test_completions_invalid_shell() {
-    let _guard = TEST_MUTEX.lock().unwrap();
     let temp_home = setup_test_env();
 
     let (success, _, stderr) = run_wtp_with_home(&["completions", "powershell"], temp_home.path());
     assert!(!success);
-    assert!(stderr.contains("Unsupported shell"));
+    // clap's ValueEnum validation provides the error message
+    assert!(stderr.contains("invalid value") || stderr.contains("possible values"),
+            "Expected clap validation error, got: {}", stderr);
 }

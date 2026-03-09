@@ -3,24 +3,27 @@
 //! Generate shell completion scripts for zsh, bash, and fish.
 //! Usage: eval "$(wtp completions zsh)"
 
-use clap::Args;
+use clap::{Args, ValueEnum};
+
+#[derive(Debug, Clone, ValueEnum)]
+pub enum ShellType {
+    Zsh,
+    Bash,
+    Fish,
+}
 
 #[derive(Args, Debug)]
 pub struct CompletionsArgs {
-    /// Shell type (zsh, bash, fish)
+    /// Shell type
     #[arg(value_name = "SHELL")]
-    shell: String,
+    shell: ShellType,
 }
 
 pub async fn execute(args: CompletionsArgs) -> anyhow::Result<()> {
-    let script = match args.shell.to_lowercase().as_str() {
-        "zsh" => generate_zsh(),
-        "bash" => generate_bash(),
-        "fish" => generate_fish(),
-        other => anyhow::bail!(
-            "Unsupported shell '{}'. Supported shells: zsh, bash, fish",
-            other
-        ),
+    let script = match args.shell {
+        ShellType::Zsh => generate_zsh(),
+        ShellType::Bash => generate_bash(),
+        ShellType::Fish => generate_fish(),
     };
     println!("{}", script);
     Ok(())

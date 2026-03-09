@@ -50,6 +50,7 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
 
       - name: Build (Windows, no fuzzy)
         if: runner.os == 'Windows'
@@ -61,7 +62,11 @@ jobs:
           cd target/${{ matrix.target }}/release
           tar czf ../../../${{ matrix.name }}.tar.gz wtp
           cd ../../..
-          shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
+          if command -v sha256sum &>/dev/null; then
+            sha256sum ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
+          else
+            shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
+          fi
 
       - name: Package (Windows)
         if: runner.os == 'Windows'

@@ -182,6 +182,28 @@ impl WorkspaceManager {
         &self.global_config().hosts
     }
 
+    /// Detect and validate the current workspace from the working directory.
+    ///
+    /// Walks up from `cwd` looking for a `.wtp` directory, then verifies the
+    /// workspace directory and its metadata exist. Returns `(name, path)`.
+    pub fn require_current_workspace(&self) -> Result<(String, PathBuf)> {
+        let (name, path) = self.detect_current_workspace()?;
+        if !path.exists() {
+            return Err(WtpError::config(format!(
+                "Workspace '{}' directory does not exist at {}",
+                name,
+                path.display()
+            )));
+        }
+        if !path.join(WTP_DIR).exists() {
+            return Err(WtpError::config(format!(
+                "Workspace '{}' is missing its .wtp directory. It may be corrupted.",
+                name
+            )));
+        }
+        Ok((name, path))
+    }
+
     /// Detect the current workspace from the working directory.
     ///
     /// Walks up from `cwd` looking for a `.wtp` directory, then matches it

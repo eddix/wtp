@@ -25,22 +25,7 @@ pub async fn execute(args: EjectArgs, manager: WorkspaceManager) -> anyhow::Resu
     git.check_git()?;
 
     // Detect current workspace
-    let (workspace_name, workspace_path) = manager.detect_current_workspace()?;
-
-    if !workspace_path.exists() {
-        anyhow::bail!(
-            "Workspace '{}' directory does not exist at {}",
-            workspace_name,
-            workspace_path.display()
-        );
-    }
-
-    if !workspace_path.join(".wtp").exists() {
-        anyhow::bail!(
-            "Workspace '{}' exists in config but the directory is missing or corrupted.",
-            workspace_name
-        );
-    }
+    let (workspace_name, workspace_path) = manager.require_current_workspace()?;
 
     // Load worktrees
     let worktree_manager = WorktreeManager::load(&workspace_path)?;

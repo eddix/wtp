@@ -181,11 +181,25 @@ impl WorktreeToml {
     }
 
     /// Remove a worktree entry by repo slug. Returns true if an entry was removed.
-    pub fn remove_by_slug(&mut self, slug: &str) -> bool {
+    /// Errors if multiple worktrees match the slug — use the full display name instead.
+    pub fn remove_by_slug(&mut self, slug: &str) -> std::result::Result<bool, String> {
+        let matches: Vec<_> = self
+            .worktrees
+            .iter()
+            .filter(|w| w.repo.slug() == slug || w.repo.display() == slug)
+            .collect();
+        if matches.len() > 1 {
+            let names: Vec<_> = matches.iter().map(|w| w.repo.display()).collect();
+            return Err(format!(
+                "Multiple worktrees match '{}': {}. Use the full name to be specific.",
+                slug,
+                names.join(", ")
+            ));
+        }
         let before = self.worktrees.len();
         self.worktrees
             .retain(|w| w.repo.slug() != slug && w.repo.display() != slug);
-        self.worktrees.len() < before
+        Ok(self.worktrees.len() < before)
     }
 }
 
@@ -235,7 +249,8 @@ impl WorktreeManager {
 
     /// Remove a worktree entry by slug and save. Returns true if an entry was removed.
     pub fn remove_worktree(&mut self, slug: &str) -> crate::core::Result<bool> {
-        let removed = self.config.remove_by_slug(slug);
+        let removed = self.config.remove_by_slug(slug)
+            .map_err(crate::core::error::WtpError::config)?;
         if removed {
             self.save()?;
         }

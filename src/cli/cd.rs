@@ -47,7 +47,8 @@ pub async fn execute(args: CdArgs, manager: WorkspaceManager) -> anyhow::Result<
     match directive_file {
         Some(file_path) => {
             // Write cd command to the directive file
-            let cd_command = format!("cd '{}'", workspace_path.display());
+            let escaped = workspace_path.display().to_string().replace("'", "'\\''");
+            let cd_command = format!("cd '{}'", escaped);
             std::fs::write(&file_path, cd_command)?;
 
             // Success message will be shown after cd completes

@@ -61,11 +61,10 @@ pub async fn execute(args: RemoveArgs, mut manager: WorkspaceManager) -> anyhow:
                 for (repo, detail) in &dirty_repos {
                     eprintln!("  {}  ({})", repo.cyan(), detail);
                 }
-                eprintln!(
-                    "\nCommit or stash your changes first, or use {} to remove anyway.",
+                anyhow::bail!(
+                    "Commit or stash your changes first, or use {} to remove anyway.",
                     "--force".bold()
                 );
-                std::process::exit(1);
             }
         }
 
@@ -164,11 +163,10 @@ pub async fn execute(args: RemoveArgs, mut manager: WorkspaceManager) -> anyhow:
                 args.name.cyan()
             );
         } else {
-            eprintln!(
-                "Use {} to remove anyway, or clean up these files first.",
+            anyhow::bail!(
+                "Workspace has extra files. Use {} to remove anyway, or clean up these files first.",
                 "--force".bold()
             );
-            std::process::exit(1);
         }
     }
 

@@ -18,22 +18,7 @@ pub async fn execute(args: StatusArgs, manager: WorkspaceManager) -> anyhow::Res
     let git = GitClient::new();
 
     // Detect current workspace from current directory
-    let (workspace_name, workspace_path) = manager.detect_current_workspace()?;
-
-    if !workspace_path.exists() {
-        anyhow::bail!(
-            "Workspace '{}' directory does not exist at {}",
-            workspace_name,
-            workspace_path.display()
-        );
-    }
-
-    if !workspace_path.join(".wtp").exists() {
-        anyhow::bail!(
-            "Workspace '{}' exists in config but the directory is missing or corrupted.",
-            workspace_name
-        );
-    }
+    let (workspace_name, workspace_path) = manager.require_current_workspace()?;
 
     println!(
         "Workspace: {} at {}",
@@ -102,8 +87,9 @@ async fn print_compact_status(
 
         println!(
             "{:<30} {:<20} {}",
-            if repo_display.len() > 30 {
-                format!("{}...", &repo_display[..27])
+            if repo_display.chars().count() > 30 {
+                let truncated: String = repo_display.chars().take(27).collect();
+                format!("{}...", truncated)
             } else {
                 repo_display
             },

@@ -60,9 +60,14 @@ async fn add_host(
         );
     }
 
-    // Expand path
+    // Expand path and convert to absolute
     let expanded = shellexpand::tilde(&path).to_string();
     let path_buf = PathBuf::from(&expanded);
+    let path_buf = if path_buf.is_relative() {
+        std::env::current_dir()?.join(&path_buf)
+    } else {
+        path_buf
+    };
 
     // Check if path exists
     if !path_buf.exists() {
