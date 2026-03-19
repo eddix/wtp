@@ -190,8 +190,11 @@ chmod +x ~/.wtp/hooks/on-create.sh
 # List all workspaces
 wtp ls
 
-# Detailed listing
+# Detailed listing (shows repo branches and status)
 wtp ls --long
+
+# Names only, one per line (useful for scripts and shell completion)
+wtp ls --short
 ```
 
 Output:
@@ -583,3 +586,16 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Agent Skills
+
+If you want coding agents to use `wtp` more consistently, this repository includes agent-facing skill drafts under `skills/`.
+
+- `skills/wtp-workspace-operator/SKILL.md`
+- `skills/wtp-repo-attach/SKILL.md`
+- `skills/wtp-safe-cleanup/SKILL.md`
+- `skills/README.md`
+
+These files are aimed at tools such as Codex, Claude Code, and Cursor. They describe when agents should use `wtp`, how to distinguish `switch` from `import`, and how to avoid risky cleanup behavior.
+
+Integration notes for each tool live under `docs/agent-integration/`.
