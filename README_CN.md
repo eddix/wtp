@@ -581,3 +581,7 @@ MIT License - 详见 [LICENSE](LICENSE)。
 ## 贡献
 
 欢迎贡献！请随时提交 Pull Request。
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=eddix/wtp&type=Date)](https://star-history.com/#eddix/wtp&Date)

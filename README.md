@@ -599,3 +599,7 @@ If you want coding agents to use `wtp` more consistently, this repository includ
 These files are aimed at tools such as Codex, Claude Code, and Cursor. They describe when agents should use `wtp`, how to distinguish `switch` from `import`, and how to avoid risky cleanup behavior.
 
 Integration notes for each tool live under `docs/agent-integration/`.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=eddix/wtp&type=Date)](https://star-history.com/#eddix/wtp&Date)
