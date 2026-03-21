@@ -370,6 +370,36 @@ impl GitClient {
         Ok(())
     }
 
+    /// Get ahead/behind counts relative to a base branch
+    ///
+    /// Returns `(ahead, behind)` where `ahead` is the number of commits
+    /// on HEAD not in base, and `behind` is the number of commits on
+    /// base not in HEAD.
+    pub fn get_ahead_behind(&self, repo_path: &Path, base: &str) -> Result<(u32, u32)> {
+        let output = Command::new("git")
+            .current_dir(repo_path)
+            .arg("rev-list")
+            .arg("--left-right")
+            .arg("--count")
+            .arg(format!("HEAD...{}", base))
+            .output()?;
+
+        if !output.status.success() {
+            // Base ref doesn't exist or other error — return zero gracefully
+            return Ok((0, 0));
+        }
+
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        let parts: Vec<&str> = output_str.trim().split('\t').collect();
+        if parts.len() == 2 {
+            let ahead = parts[0].parse().unwrap_or(0);
+            let behind = parts[1].parse().unwrap_or(0);
+            Ok((ahead, behind))
+        } else {
+            Ok((0, 0))
+        }
+    }
+
     /// Get the stash count for a repository
     pub fn get_stash_count(&self, repo_path: &Path) -> Result<u32> {
         let output = Command::new("git")

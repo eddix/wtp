@@ -81,11 +81,31 @@ pub async fn execute(args: LsArgs, manager: WorkspaceManager) -> anyhow::Result<
                                 Err(_) => "?".to_string(),
                             };
 
+                            let base_str = match &wt.base {
+                                Some(base) if base != "HEAD" => {
+                                    match git.get_ahead_behind(&wt_full_path, base) {
+                                        Ok((ahead, behind)) if ahead > 0 || behind > 0 => {
+                                            let mut parts = Vec::new();
+                                            if ahead > 0 {
+                                                parts.push(format!("+{}", ahead));
+                                            }
+                                            if behind > 0 {
+                                                parts.push(format!("-{}", behind));
+                                            }
+                                            format!("  {}", format!("({}: {})", base, parts.join(" ")).dimmed())
+                                        }
+                                        _ => String::new(),
+                                    }
+                                }
+                                _ => String::new(),
+                            };
+
                             println!(
-                                "  {:<30} {:<20} {}",
+                                "  {:<30} {:<20} {}{}",
                                 repo_display,
                                 wt.branch.cyan(),
-                                status_str
+                                status_str,
+                                base_str
                             );
                         }
                     }
