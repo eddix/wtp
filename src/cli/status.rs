@@ -133,6 +133,31 @@ async fn print_detailed_status(
             wt.branch.cyan()
         );
 
+        // Base branch divergence
+        if let Some(base) = &wt.base {
+            if base != "HEAD" {
+                let base_info = match git.get_ahead_behind(&wt_full_path, base) {
+                    Ok((ahead, behind)) if ahead > 0 || behind > 0 => {
+                        let mut parts = Vec::new();
+                        if ahead > 0 {
+                            parts.push(format!("{}", format!("+{} ahead", ahead).green()));
+                        }
+                        if behind > 0 {
+                            parts.push(format!("{}", format!("-{} behind", behind).red()));
+                        }
+                        format!("{} ({})", base.cyan(), parts.join(", "))
+                    }
+                    Ok(_) => format!("{} {}", base.cyan(), "up to date".green()),
+                    Err(_) => format!("{} {}", base.cyan(), "unknown".dimmed()),
+                };
+                println!(
+                    "  {:<10} {}",
+                    "Base:".bold(),
+                    base_info
+                );
+            }
+        }
+
         // HEAD: hash + subject + relative time
         let head_short = git.get_head_commit(&wt_full_path).unwrap_or_default();
         let subject = git
