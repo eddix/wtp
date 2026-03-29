@@ -38,7 +38,7 @@ Monorepo 是管理关联代码库的流行方案，但它并非万能：
 ```bash
 git clone https://github.com/eddix/wtp
 cd wtp
-cargo install --path .
+cargo install --path wtp-cli
 ```
 
 ## 快速开始
@@ -547,31 +547,35 @@ cargo test
 ### 项目结构
 
 ```
-src/
+wtp-core/src/            # 核心业务逻辑（UI 无关）
+├── lib.rs               # 公共 API 导出
+├── config.rs            # 配置管理
+├── error.rs             # 错误类型
+├── fence.rs             # 安全围栏
+├── git.rs               # Git 命令封装
+├── workspace.rs         # 工作空间管理
+└── worktree.rs          # Worktree 数据模型
+
+wtp-cli/src/             # CLI 应用
 ├── main.rs              # 入口
-├── cli/                 # CLI 子命令
-│   ├── mod.rs           # CLI 入口和帮助系统
-│   ├── cd.rs
-│   ├── completions.rs   # Shell 补全生成
-│   ├── create.rs
-│   ├── eject.rs         # 从工作空间移除 worktree
-│   ├── fuzzy.rs         # 模糊搜索集成
-│   ├── host.rs          # Host 别名管理
-│   ├── import.rs
-│   ├── ls.rs
-│   ├── remove.rs
-│   ├── shell_init.rs
-│   ├── status.rs
-│   ├── switch.rs
-│   └── theme.rs         # 帮助输出的统一样式
-├── core/                # 核心业务逻辑
-│   ├── mod.rs
-│   ├── config.rs        # 配置管理
-│   ├── error.rs         # 错误类型
-│   ├── fence.rs         # 安全围栏
-│   ├── git.rs           # Git 命令封装
-│   ├── workspace.rs     # 工作空间管理
-│   └── worktree.rs      # Worktree 数据模型
+└── cli/                 # CLI 子命令
+    ├── mod.rs           # CLI 入口和帮助系统
+    ├── cd.rs
+    ├── completions.rs   # Shell 补全生成
+    ├── create.rs
+    ├── eject.rs         # 从工作空间移除 worktree
+    ├── fuzzy.rs         # 模糊搜索集成
+    ├── git_status_fmt.rs # Git 状态格式化扩展
+    ├── host.rs          # Host 别名管理
+    ├── import.rs
+    ├── ls.rs
+    ├── remove.rs
+    ├── shell_init.rs
+    ├── status.rs
+    ├── switch.rs
+    └── theme.rs         # 帮助输出的统一样式
+
+wtp-gui/                 # GUI 应用（脚手架，基于 GPUI）
 ```
 
 ## 许可证

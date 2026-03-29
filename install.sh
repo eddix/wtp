@@ -5,7 +5,7 @@ set -e
 
 # Build release binary
 echo "Building wtp..."
-cargo build --release
+cargo build --release -p wtp
 
 # Ensure ~/.local/bin exists
 mkdir -p ~/.local/bin

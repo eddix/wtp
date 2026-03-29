@@ -42,27 +42,39 @@ read -p "Confirm? [yes/N] " confirm
 ## Module Structure
 
 ```
-src/
+wtp-core/src/            # Core business logic (UI-independent)
+├── lib.rs               # Public API exports
+├── config.rs            # GlobalConfig, WorkspaceConfig, HostConfig, HooksConfig
+├── error.rs             # WtpError enum, Result type
+├── fence.rs             # Security fence for file operations
+├── git.rs               # GitClient wrapper around git CLI
+├── workspace.rs         # WorkspaceManager (create_workspace, remove_workspace, etc.)
+└── worktree.rs          # WorktreeEntry, WorktreeManager, RepoRef, WorktreeToml
+
+wtp-cli/src/             # CLI application
 ├── main.rs              # Entry point, error styling
-├── cli/                 # CLI subcommands
-│   ├── mod.rs           # CLI argument definitions (clap), command routing
-│   ├── cd.rs            # Change to workspace directory (needs shell integration)
-│   ├── create.rs        # Create new workspace (--no-hook flag supported)
-│   ├── host.rs          # Manage host aliases (add, ls, rm, set-default)
-│   ├── import.rs        # Import a worktree into workspace
-│   ├── ls.rs            # List workspaces (--short, --long flags)
-│   ├── remove.rs        # Remove workspace (--delete-dir, --force flags)
-│   ├── shell_init.rs    # Generate shell integration script
-│   ├── status.rs        # Show workspace status (--workspace, --long, --dirty flags)
-│   └── switch.rs        # Switch current repo to workspace (--create, --branch, --base flags)
-└── core/                # Core business logic (UI-independent)
-    ├── mod.rs           # Module exports
-    ├── config.rs        # GlobalConfig, WorkspaceConfig, HostConfig, HooksConfig
-    ├── error.rs         # WtpError enum, Result type
-    ├── fence.rs         # Security fence for file operations
-    ├── git.rs           # GitClient wrapper around git CLI
-    ├── workspace.rs     # WorkspaceManager (create_workspace, remove_workspace, etc.)
-    └── worktree.rs      # WorktreeEntry, WorktreeManager, RepoRef, WorktreeToml
+└── cli/                 # CLI subcommands
+    ├── mod.rs           # CLI argument definitions (clap), command routing
+    ├── cd.rs            # Change to workspace directory (needs shell integration)
+    ├── create.rs        # Create new workspace (--no-hook flag supported)
+    ├── git_status_fmt.rs # Git status formatting extension trait
+    ├── host.rs          # Manage host aliases (add, ls, rm, set-default)
+    ├── import.rs        # Import a worktree into workspace
+    ├── ls.rs            # List workspaces (--short, --long flags)
+    ├── remove.rs        # Remove workspace (--delete-dir, --force flags)
+    ├── shell_init.rs    # Generate shell integration script
+    ├── status.rs        # Show workspace status (--workspace, --long, --dirty flags)
+    └── switch.rs        # Switch current repo to workspace (--create, --branch, --base flags)
+
+wtp-gui/                 # GUI application (scaffold, GPUI-based)
+├── src/
+│   ├── main.rs          # Entry point
+│   ├── app.rs           # Application setup
+│   ├── state.rs         # Application state
+│   ├── tray.rs          # System tray
+│   ├── views/           # View components
+│   └── components/      # Reusable components
+└── Cargo.toml
 ```
 
 ---
@@ -90,7 +102,7 @@ Commands are grouped visually in help output but kept flat (not nested).
 
 ## Key Data Structures
 
-### GlobalConfig (src/core/config.rs)
+### GlobalConfig (wtp-core/src/config.rs)
 ```rust
 pub struct GlobalConfig {
     pub workspace_root: PathBuf,           // default: ~/.wtp/workspaces
@@ -100,7 +112,7 @@ pub struct GlobalConfig {
 }
 ```
 
-### HooksConfig (src/core/config.rs)
+### HooksConfig (wtp-core/src/config.rs)
 ```rust
 pub struct HooksConfig {
     pub on_create: Option<PathBuf>, // Script run after workspace creation
@@ -116,7 +128,7 @@ Hook behavior:
 - Hook stdout is printed to terminal
 - On Unix, script must have execute permissions
 
-### WorktreeEntry (src/core/worktree.rs)
+### WorktreeEntry (wtp-core/src/worktree.rs)
 ```rust
 pub struct WorktreeEntry {
     pub id: WorktreeId,
@@ -128,7 +140,7 @@ pub struct WorktreeEntry {
 }
 ```
 
-### RepoRef (src/core/worktree.rs)
+### RepoRef (wtp-core/src/worktree.rs)
 ```rust
 pub enum RepoRef {
     Hosted { host: String, path: String },  // e.g., gh:abc/def
@@ -161,7 +173,7 @@ First existing file wins. Multiple config files trigger a warning.
 
 ---
 
-## Security Fence (src/core/fence.rs)
+## Security Fence (wtp-core/src/fence.rs)
 
 Prevents file operations outside `workspace_root` without explicit confirmation.
 
@@ -181,9 +193,9 @@ pub struct Fence {
 - `remove_file(path)` - Remove file with fence check
 
 ### Global Instance
-Initialized at startup in `cli/mod.rs`:
+Initialized at startup in `wtp-cli/src/cli/mod.rs`:
 ```rust
-crate::core::fence::init_global_fence(global_config.workspace_root.clone());
+wtp_core::fence::init_global_fence(global_config.workspace_root.clone());
 ```
 
 ### User Experience
@@ -244,7 +256,7 @@ eval "$(wtp shell-init)"
 
 ## Error Handling
 
-### WtpError Variants (src/core/error.rs)
+### WtpError Variants (wtp-core/src/error.rs)
 - `Io` - std::io::Error
 - `Config(String)` - Configuration errors
 - `Git(String)` - Git operation errors
@@ -261,7 +273,7 @@ eval "$(wtp shell-init)"
 - `MultipleConfigFiles { files, used }`
 
 ### Error Display
-Errors are displayed in red using `anstyle` in `main.rs`:
+Errors are displayed in red using `anstyle` in `wtp-cli/src/main.rs`:
 ```rust
 let error_style = Style::new().fg_color(Some(anstyle::Color::Ansi(AnsiColor::Red)));
 eprintln!("{error_style}Error:{error_style:#} {e}");
@@ -283,7 +295,7 @@ eprintln!("{error_style}Error:{error_style:#} {e}");
 ---
 
 ## Testing Strategy
-- **Unit tests**: In-module tests for core logic (see `src/core/fence.rs` tests)
+- **Unit tests**: In-module tests for core logic (see `wtp-core/src/fence.rs` tests)
 - **Integration tests**: CLI commands with temporary directories and isolated HOME
 - **Test isolation**: Tests must use temp directories as HOME to avoid polluting user's `~/.wtp`
 

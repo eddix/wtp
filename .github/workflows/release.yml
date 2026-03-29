@@ -47,14 +47,14 @@ jobs:
 
       - name: Build (Unix)
         if: runner.os != 'Windows'
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release -p wtp --target ${{ matrix.target }}
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
 
       - name: Build (Windows, no fuzzy)
         if: runner.os == 'Windows'
-        run: cargo build --release --target ${{ matrix.target }} --no-default-features
+        run: cargo build --release -p wtp --target ${{ matrix.target }} --no-default-features
 
       - name: Package (Unix)
         if: runner.os != 'Windows'

@@ -1,0 +1,222 @@
+//! Remove workspace command
+//!
+//! Eject all worktrees from a workspace, then remove the workspace directory.
+
+use clap::Args;
+use colored::Colorize;
+use std::path::Path;
+
+use crate::cli::git_status_fmt::GitStatusFormat;
+use wtp_core::{GitClient, WorkspaceManager, WorktreeManager};
+
+#[derive(Args, Debug)]
+pub struct RemoveArgs {
+    /// Name of the workspace to remove
+    pub name: String,
+
+    /// Force removal even if worktrees have uncommitted changes
+    #[arg(short, long)]
+    force: bool,
+}
+
+pub async fn execute(args: RemoveArgs, mut manager: WorkspaceManager) -> anyhow::Result<()> {
+    let git = GitClient::new();
+    git.check_git()?;
+
+    // Check if workspace exists
+    let workspace_path = manager
+        .global_config()
+        .get_workspace_path(&args.name)
+        .ok_or_else(|| anyhow::anyhow!("Workspace '{}' not found", args.name))?;
+
+    println!("Removing workspace: {}\n", args.name.cyan());
+
+    // Phase 1: Eject all worktrees
+    let worktree_manager = WorktreeManager::load(&workspace_path)?;
+    let worktrees = worktree_manager.list_worktrees().to_vec();
+
+    if !worktrees.is_empty() {
+        println!("{}:", "Ejecting worktrees".bold());
+
+        // Pre-check: if not --force, check for dirty worktrees first
+        if !args.force {
+            let mut boundary_violations = Vec::new();
+            let mut dirty_repos = Vec::new();
+            for entry in &worktrees {
+                let wt_path = workspace_path.join(&entry.worktree_path);
+                // H3 fix: validate worktree path is within workspace
+                if let Err(e) = wtp_core::fence::validate_within_boundary(&workspace_path, &wt_path)
+                {
+                    boundary_violations.push(format!("  {} — {}", entry.repo.display(), e));
+                    continue;
+                }
+                if wt_path.exists() {
+                    match git.get_status(&wt_path) {
+                        Ok(status) => {
+                            if status.dirty {
+                                dirty_repos
+                                    .push((entry.repo.display(), status.format_detail_status()));
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "  {} {} — could not read status: {}",
+                                "!".yellow().bold(),
+                                entry.repo.slug().cyan(),
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+            if !boundary_violations.is_empty() {
+                anyhow::bail!(
+                    "Refusing to remove workspace because these worktree entries are outside the workspace boundary:\n{}",
+                    boundary_violations.join("\n")
+                );
+            }
+            if !dirty_repos.is_empty() {
+                eprintln!(
+                    "\n{} The following worktrees have uncommitted changes:\n",
+                    "Error:".red().bold()
+                );
+                for (repo, detail) in &dirty_repos {
+                    eprintln!("  {}  ({})", repo.cyan(), detail);
+                }
+                anyhow::bail!(
+                    "Commit or stash your changes first, or use {} to remove anyway.",
+                    "--force".bold()
+                );
+            }
+        }
+
+        for entry in &worktrees {
+            let wt_path = workspace_path.join(&entry.worktree_path);
+            // H3 fix: validate worktree path is within workspace
+            if let Err(e) = wtp_core::fence::validate_within_boundary(&workspace_path, &wt_path) {
+                anyhow::bail!(
+                    "Refusing to continue removal because worktree '{}' is outside the workspace boundary: {}",
+                    entry.repo.display(),
+                    e
+                );
+            }
+            let slug = entry.repo.slug();
+
+            if wt_path.exists() {
+                match git.get_status(&wt_path) {
+                    Ok(status) => {
+                        if status.dirty {
+                            eprintln!(
+                                "  {} {} ({}), proceeding with --force.",
+                                "Warning:".yellow().bold(),
+                                slug.cyan(),
+                                status.format_detail_status()
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "  {} {} — could not read status: {}",
+                            "!".yellow().bold(),
+                            slug.cyan(),
+                            e
+                        );
+                    }
+                }
+
+                match git.get_repo_root(Some(&wt_path)) {
+                    Ok(repo_root) => match git.remove_worktree(&repo_root, &wt_path, args.force) {
+                        Ok(()) => {
+                            println!("  {} {}", "✓".green().bold(), slug.cyan());
+                        }
+                        Err(e) => {
+                            eprintln!("  {} {} — {}", "✗".red().bold(), slug.cyan(), e);
+                            if !args.force {
+                                anyhow::bail!(
+                                    "Failed to eject '{}'. Use {} to force removal.",
+                                    slug,
+                                    "--force".bold()
+                                );
+                            }
+                        }
+                    },
+                    Err(_) => {
+                        eprintln!(
+                            "  {} {} — could not resolve repo root, cleaning up record only.",
+                            "!".yellow().bold(),
+                            slug.cyan()
+                        );
+                    }
+                }
+            } else {
+                eprintln!(
+                    "  {} {} — directory not found, cleaning up record only.",
+                    "!".yellow().bold(),
+                    slug.cyan()
+                );
+            }
+        }
+
+        // Clear all entries from worktree.toml (batch save)
+        let mut worktree_manager = WorktreeManager::load(&workspace_path)?;
+        let slug_strings: Vec<String> = worktrees.iter().map(|e| e.repo.slug()).collect();
+        let slugs: Vec<&str> = slug_strings.iter().map(|s| s.as_str()).collect();
+        worktree_manager.remove_many(&slugs)?;
+
+        println!();
+    }
+
+    // Phase 2: Check remaining contents and remove workspace directory
+    let remaining = list_remaining_contents(&workspace_path);
+
+    if remaining.is_empty() {
+        // Only .wtp directory left (or nothing) — safe to remove
+        manager.remove_workspace(&args.name, true)?;
+        println!(
+            "{} Workspace '{}' removed.",
+            "✓".green().bold(),
+            args.name.cyan()
+        );
+    } else {
+        // There are extra files/dirs beyond .wtp
+        eprintln!(
+            "{} Workspace directory has extra files besides worktrees:\n",
+            "Note:".yellow().bold()
+        );
+        for item in &remaining {
+            eprintln!("  {}", item.dimmed());
+        }
+        eprintln!();
+
+        if args.force {
+            manager.remove_workspace(&args.name, true)?;
+            println!(
+                "{} Workspace '{}' removed (including extra files).",
+                "✓".green().bold(),
+                args.name.cyan()
+            );
+        } else {
+            anyhow::bail!(
+                "Workspace has extra files. Use {} to remove anyway, or clean up these files first.",
+                "--force".bold()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// List non-.wtp contents remaining in the workspace directory.
+fn list_remaining_contents(workspace_path: &Path) -> Vec<String> {
+    let mut remaining = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(workspace_path) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name == ".wtp" {
+                continue;
+            }
+            remaining.push(name);
+        }
+    }
+    remaining
+}

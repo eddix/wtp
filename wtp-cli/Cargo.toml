@@ -1,0 +1,50 @@
+[package]
+name = "wtp"
+version = "0.1.0"
+edition = "2024"
+authors = ["eddix <eli.tech.arm@gmail.com>"]
+description = "WorkTree for Polyrepo - Manage multiple git worktrees across repositories"
+license = "MIT"
+repository = "https://github.com/eddix/wtp"
+keywords = ["git", "worktree", "cli", "polyrepo", "workspace"]
+categories = ["command-line-utilities", "development-tools"]
+rust-version = "1.90"
+
+[[bin]]
+name = "wtp"
+path = "src/main.rs"
+
+[dependencies]
+wtp-core = { path = "../wtp-core" }
+
+# CLI framework
+clap = { version = "4.5", features = ["derive", "env", "cargo"] }
+wtp-derive = { path = "../wtp-derive" }
+
+# Error handling
+anyhow = "1.0"
+
+# Async runtime
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "process", "io-util"] }
+
+# TUI framework
+ratatui = "0.30"
+crossterm = "0.29"
+skim = { version = "3.6", default-features = false, optional = true }
+
+# Terminal output
+colored = "2.1"
+anstyle = "1.0"
+anstream = "0.6"
+
+# Utilities (used by CLI only: shellexpand for import path expansion)
+shellexpand = "3.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3.13"
+
+[features]
+default = ["fuzzy"]
+fuzzy = ["skim"]

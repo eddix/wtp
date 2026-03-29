@@ -1,0 +1,32 @@
+[package]
+name = "wtp-gui"
+version = "0.1.0"
+edition = "2024"
+authors = ["eddix <eli.tech.arm@gmail.com>"]
+description = "GUI application for wtp — WorkTree for Polyrepo"
+license = "MIT"
+repository = "https://github.com/eddix/wtp"
+rust-version = "1.90"
+
+[[bin]]
+name = "wtp-gui"
+path = "src/main.rs"
+
+[dependencies]
+wtp-core = { path = "../wtp-core" }
+
+# GUI framework (pin to a specific Zed commit for API stability)
+# TODO: Determine the exact GPUI commit hash to pin before building
+# gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", rev = "TBD_PIN_COMMIT_HASH" }
+
+# System tray
+tray-icon = "0.19"
+
+# Async runtime
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros"] }
+
+# Error handling
+anyhow = "1.0"
+
+# Utilities
+smol = "2.0"

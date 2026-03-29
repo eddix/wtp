@@ -81,7 +81,7 @@ source $HOME/.cargo/env
 #### 选项 1：使用 cargo install 安装（推荐）
 
 ```bash
-cargo install --path .
+cargo install --path wtp-cli
 ```
 
 这会将 `wtp` 安装到 `~/.cargo/bin/`，通常该目录已在 PATH 中，无需额外配置。
