@@ -372,3 +372,107 @@ fn test_completions_invalid_shell() {
         stderr
     );
 }
+
+#[test]
+fn test_create_workspace_sanitizes_slash() {
+    let temp_home = setup_test_env();
+    let home_path = temp_home.path();
+
+    let (success, stdout, stderr) = run_wtp_with_home(
+        &["create", "hotfix/update_task_issue_1234", "--no-hook"],
+        home_path,
+    );
+    assert!(
+        success,
+        "create failed; stdout={} stderr={}",
+        stdout, stderr
+    );
+    assert!(
+        stdout.contains("hotfix_update_task_issue_1234"),
+        "expected sanitized name in output, got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("Sanitized") || stdout.contains("sanitized"),
+        "expected 'Sanitized' notice in output, got: {}",
+        stdout
+    );
+
+    // `wtp ls` should now find the workspace under its sanitized name.
+    let (ok, ls_out, ls_err) = run_wtp_with_home(&["ls", "--short"], home_path);
+    assert!(ok, "ls failed; stdout={} stderr={}", ls_out, ls_err);
+    assert!(
+        ls_out.contains("hotfix_update_task_issue_1234"),
+        "ls did not find sanitized workspace, got: {}",
+        ls_out
+    );
+
+    // The nested directory must NOT have been created.
+    let nested = home_path
+        .join(".wtp")
+        .join("workspaces")
+        .join("hotfix")
+        .join("update_task_issue_1234");
+    assert!(
+        !nested.exists(),
+        "nested directory was created: {}",
+        nested.display()
+    );
+
+    // Cleanup
+    let _ = run_wtp_with_home(
+        &["rm", "hotfix_update_task_issue_1234", "--force"],
+        home_path,
+    );
+}
+
+#[test]
+fn test_create_workspace_collapses_double_slash() {
+    let temp_home = setup_test_env();
+    let home_path = temp_home.path();
+
+    let (success, stdout, stderr) =
+        run_wtp_with_home(&["create", "feat//foo", "--no-hook"], home_path);
+    assert!(
+        success,
+        "create failed; stdout={} stderr={}",
+        stdout, stderr
+    );
+    // `feat//foo` should collapse to `feat_foo`, not `feat__foo`.
+    assert!(
+        stdout.contains("feat_foo") && !stdout.contains("feat__foo"),
+        "expected collapsed sanitized name 'feat_foo', got: {}",
+        stdout
+    );
+
+    let (ok, ls_out, _) = run_wtp_with_home(&["ls", "--short"], home_path);
+    assert!(ok);
+    assert!(
+        ls_out.contains("feat_foo"),
+        "ls did not find feat_foo, got: {}",
+        ls_out
+    );
+
+    let _ = run_wtp_with_home(&["rm", "feat_foo", "--force"], home_path);
+}
+
+#[test]
+fn test_create_workspace_rejects_pathological_name() {
+    let temp_home = setup_test_env();
+    let home_path = temp_home.path();
+
+    // A name consisting only of separators sanitizes to an empty string
+    // and must be rejected so we don't create a misnamed workspace.
+    let (success, stdout, stderr) =
+        run_wtp_with_home(&["create", "///", "--no-hook"], home_path);
+    assert!(
+        !success,
+        "create unexpectedly succeeded for '///'; stdout={} stderr={}",
+        stdout, stderr
+    );
+    assert!(
+        stderr.contains("empty") || stderr.contains("reserved") || stderr.contains("sanitiz"),
+        "expected rejection message about sanitization, got stderr: {}",
+        stderr
+    );
+}

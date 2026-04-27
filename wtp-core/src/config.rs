@@ -225,9 +225,11 @@ impl GlobalConfig {
     }
 
     /// Get the path for a workspace by name
-    /// Scans the workspace_root for directories with .wtp subdirectory
+    ///
+    /// The name is sanitized first so callers can pass either the original
+    /// (`hotfix/foo`) or the on-disk (`hotfix_foo`) form interchangeably.
     pub fn get_workspace_path(&self, name: &str) -> Option<PathBuf> {
-        let path = self.workspace_root.join(name);
+        let path = self.workspace_root.join(sanitize_workspace_name(name));
         if path.is_dir() && path.join(WTP_DIR).is_dir() {
             Some(path)
         } else {
@@ -270,8 +272,12 @@ impl GlobalConfig {
     }
 
     /// Get the absolute workspace path for a new workspace
+    ///
+    /// Sanitizes the name so a single workspace always lives directly under
+    /// `workspace_root` (one path component), regardless of what the user typed.
+    /// See [`sanitize_workspace_name`].
     pub fn resolve_workspace_path(&self, name: &str) -> PathBuf {
-        self.workspace_root.join(name)
+        self.workspace_root.join(sanitize_workspace_name(name))
     }
 }
 
@@ -279,5 +285,129 @@ impl LoadedConfig {
     /// Scan all workspaces (delegates to config)
     pub fn scan_workspaces(&self) -> HashMap<String, PathBuf> {
         self.config.scan_workspaces()
+    }
+}
+
+/// Rewrite a user-supplied workspace name to a safe single-segment directory name.
+///
+/// `wtp ls` only scans direct children of `workspace_root`, so a name like
+/// `hotfix/update_task_issue_1234` would otherwise create a nested directory
+/// that the listing never sees. We replace path separators and other
+/// cross-platform-unsafe characters with `_`, collapse runs of underscores
+/// produced by replacement, and trim leading/trailing dots and spaces (also a
+/// Windows requirement).
+///
+/// The function is idempotent: calling it on an already-sanitized name returns
+/// the same string.
+pub fn sanitize_workspace_name(name: &str) -> String {
+    // Pass 1: replace unsafe chars with `_`.
+    let mut replaced = String::with_capacity(name.len());
+    for ch in name.chars() {
+        let unsafe_char = matches!(
+            ch,
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
+        ) || (ch as u32) < 0x20;
+        replaced.push(if unsafe_char { '_' } else { ch });
+    }
+
+    // Pass 2: collapse consecutive underscores so `feat//foo` -> `feat_foo`,
+    // not `feat__foo`.
+    let mut collapsed = String::with_capacity(replaced.len());
+    let mut prev_underscore = false;
+    for ch in replaced.chars() {
+        if ch == '_' {
+            if !prev_underscore {
+                collapsed.push(ch);
+            }
+            prev_underscore = true;
+        } else {
+            collapsed.push(ch);
+            prev_underscore = false;
+        }
+    }
+
+    // Pass 3: trim leading/trailing `.` and spaces (Windows reserves these and
+    // they're ergonomically bad anyway).
+    let trimmed = collapsed
+        .trim_matches(|c: char| c == '.' || c == ' ')
+        .to_string();
+
+    // Pathological inputs that consisted entirely of unsafe chars (`/`, `///`,
+    // mixed control chars, ...) collapse to a lone `_` after replacement.
+    // Treat that as "no usable name" so the caller can reject creation.
+    if trimmed.chars().all(|c| c == '_') {
+        return String::new();
+    }
+    trimmed
+}
+
+#[cfg(test)]
+mod sanitize_workspace_name_tests {
+    use super::sanitize_workspace_name;
+
+    #[test]
+    fn passes_through_clean_names() {
+        assert_eq!(sanitize_workspace_name("simple"), "simple");
+        assert_eq!(sanitize_workspace_name("hotfix-1234"), "hotfix-1234");
+        assert_eq!(sanitize_workspace_name("a_b_c"), "a_b_c");
+        assert_eq!(sanitize_workspace_name("v1.2"), "v1.2");
+    }
+
+    #[test]
+    fn replaces_path_separators() {
+        assert_eq!(
+            sanitize_workspace_name("hotfix/update_task_issue_1234"),
+            "hotfix_update_task_issue_1234"
+        );
+        assert_eq!(sanitize_workspace_name("a\\b"), "a_b");
+        assert_eq!(sanitize_workspace_name("feat/foo/bar"), "feat_foo_bar");
+    }
+
+    #[test]
+    fn collapses_consecutive_separators() {
+        assert_eq!(sanitize_workspace_name("a//b"), "a_b");
+        assert_eq!(sanitize_workspace_name("a/\\b"), "a_b");
+        assert_eq!(sanitize_workspace_name("a___b"), "a_b");
+    }
+
+    #[test]
+    fn replaces_windows_reserved_chars() {
+        assert_eq!(sanitize_workspace_name("a:b"), "a_b");
+        assert_eq!(sanitize_workspace_name("a*b"), "a_b");
+        assert_eq!(sanitize_workspace_name("a?b"), "a_b");
+        assert_eq!(sanitize_workspace_name("a\"b"), "a_b");
+        assert_eq!(sanitize_workspace_name("a<b"), "a_b");
+        assert_eq!(sanitize_workspace_name("a>b"), "a_b");
+        assert_eq!(sanitize_workspace_name("a|b"), "a_b");
+    }
+
+    #[test]
+    fn replaces_control_characters() {
+        assert_eq!(sanitize_workspace_name("a\nb"), "a_b");
+        assert_eq!(sanitize_workspace_name("a\tb"), "a_b");
+        assert_eq!(sanitize_workspace_name("a\x01b"), "a_b");
+    }
+
+    #[test]
+    fn trims_leading_and_trailing_dots_and_spaces() {
+        assert_eq!(sanitize_workspace_name(" foo "), "foo");
+        assert_eq!(sanitize_workspace_name(".foo."), "foo");
+        assert_eq!(sanitize_workspace_name(" .foo. "), "foo");
+    }
+
+    #[test]
+    fn is_idempotent() {
+        let once = sanitize_workspace_name("hotfix/update_task");
+        let twice = sanitize_workspace_name(&once);
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn returns_empty_for_pathological_inputs() {
+        assert_eq!(sanitize_workspace_name(""), "");
+        assert_eq!(sanitize_workspace_name("/"), "");
+        assert_eq!(sanitize_workspace_name("///"), "");
+        assert_eq!(sanitize_workspace_name("..."), "");
+        assert_eq!(sanitize_workspace_name("   "), "");
     }
 }

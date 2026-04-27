@@ -9,6 +9,13 @@ use std::process::Stdio;
 
 /// Result of creating a workspace, containing any hook output
 pub struct CreateResult {
+    /// The sanitized workspace name actually used on disk.
+    ///
+    /// May differ from the name the user typed when characters such as `/`
+    /// were rewritten — see [`crate::sanitize_workspace_name`]. Callers
+    /// should compare this against the original input to decide whether to
+    /// surface a "renamed to ..." notice.
+    pub effective_name: String,
     pub path: PathBuf,
     pub hook_output: Option<String>,
     pub hook_warning: Option<String>,
@@ -56,13 +63,28 @@ impl WorkspaceManager {
     }
 
     /// Create a new workspace
+    ///
+    /// `name` is sanitized before use (see [`crate::sanitize_workspace_name`])
+    /// so that workspace directories are always single-segment children of
+    /// `workspace_root`. The sanitized form is returned in
+    /// [`CreateResult::effective_name`].
     pub async fn create_workspace(&mut self, name: &str, run_hook: bool) -> Result<CreateResult> {
-        let workspace_path = self.global_config().resolve_workspace_path(name);
+        let effective_name = crate::config::sanitize_workspace_name(name);
+        if effective_name.is_empty() || effective_name == "." || effective_name == ".." {
+            return Err(WtpError::config(format!(
+                "Workspace name '{}' is empty or reserved after sanitization",
+                name
+            )));
+        }
+        let workspace_path = self
+            .global_config()
+            .workspace_root
+            .join(&effective_name);
 
         // Check if workspace already exists (directory with .wtp subdirectory)
         if workspace_path.join(WTP_DIR).exists() {
             return Err(WtpError::WorkspaceAlreadyExists {
-                name: name.to_string(),
+                name: effective_name,
                 path: workspace_path.clone(),
             });
         }
@@ -79,11 +101,13 @@ impl WorkspaceManager {
         let fence = Fence::from_config(&self.loaded_config.config);
         self.initialize_workspace_dir(&workspace_path, &fence)?;
 
-        // Run post-create hook if configured and enabled
+        // Run post-create hook if configured and enabled. The hook receives the
+        // sanitized name so callers can rely on it for filesystem operations.
         if run_hook {
-            match self.run_create_hook(name, &workspace_path).await {
+            match self.run_create_hook(&effective_name, &workspace_path).await {
                 Ok(output) => {
                     return Ok(CreateResult {
+                        effective_name,
                         path: workspace_path,
                         hook_output: output,
                         hook_warning: None,
@@ -91,6 +115,7 @@ impl WorkspaceManager {
                 }
                 Err(e) => {
                     return Ok(CreateResult {
+                        effective_name,
                         path: workspace_path,
                         hook_output: None,
                         hook_warning: Some(format!("Failed to run create hook: {}", e)),
@@ -100,6 +125,7 @@ impl WorkspaceManager {
         }
 
         Ok(CreateResult {
+            effective_name,
             path: workspace_path,
             hook_output: None,
             hook_warning: None,

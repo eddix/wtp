@@ -18,6 +18,17 @@ pub struct CreateArgs {
 pub async fn execute(args: CreateArgs, mut manager: WorkspaceManager) -> anyhow::Result<()> {
     let result = manager.create_workspace(&args.name, !args.no_hook).await?;
 
+    // Surface a notice if the requested name was rewritten so the user knows
+    // which name to use in subsequent `wtp ls` / `wtp cd` calls.
+    if args.name != result.effective_name {
+        println!(
+            "{} Sanitized workspace name from {} to {}",
+            "i".cyan().bold(),
+            format!("'{}'", args.name).dimmed(),
+            format!("'{}'", result.effective_name).cyan()
+        );
+    }
+
     if let Some(warning) = &result.hook_warning {
         eprintln!("{} {}", "Warning:".yellow().bold(), warning);
     }
@@ -28,7 +39,7 @@ pub async fn execute(args: CreateArgs, mut manager: WorkspaceManager) -> anyhow:
     println!(
         "{} Created workspace '{}' at {}",
         "✓".green().bold(),
-        args.name.cyan(),
+        result.effective_name.cyan(),
         result.path.display().to_string().dimmed()
     );
     println!();
