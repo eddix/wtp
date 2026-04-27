@@ -1,21 +1,46 @@
 //! wtp-gui entry point
 //!
-//! GUI application for managing git workspaces.
-//! Uses GPUI framework for rendering and tray-icon for system tray integration.
+//! Initializes the GPUI application, sets up the system tray icon,
+//! and enters the main event loop.
 
 mod app;
+mod assets;
 mod components;
 mod state;
 mod tray;
 mod views;
 
+use assets::Assets;
+use gpui::AppContext;
+use state::FlashLevel;
+
 fn main() {
-    // TODO: Initialize GPUI App once the gpui dependency is pinned
-    // let app = gpui::App::new();
-    // app.run(|cx| {
-    //     let state = cx.new(|_| state::AppState::load());
-    //     tray::setup_tray(cx, state.clone());
-    // });
-    eprintln!("wtp-gui: GPUI dependency not yet configured. See Cargo.toml for details.");
-    std::process::exit(1);
+    gpui_platform::application().with_assets(Assets).run(|cx| {
+        let font_warning = Assets
+            .load_fonts(cx)
+            .err()
+            .map(|error| format!("Failed to load bundled fonts, using fallbacks: {error}"));
+
+        components::text_input::init(cx);
+
+        // Create shared application state as a GPUI Entity
+        let state = cx.new(|_cx| state::AppState::load());
+        if let Some(warning) = font_warning {
+            state.update(cx, |state, cx| {
+                state.set_flash(FlashLevel::Warning, warning);
+                cx.notify();
+            });
+        }
+
+        // Set up system tray icon with workspace quick-access menu
+        if let Err(error) = tray::setup_tray(cx, state.clone()) {
+            state.update(cx, |state, cx| {
+                state.set_flash(FlashLevel::Warning, error);
+                cx.notify();
+            });
+        }
+
+        // Open the main window immediately on launch
+        app::open_main_window(cx, state);
+    });
 }

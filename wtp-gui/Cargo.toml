@@ -15,18 +15,36 @@ path = "src/main.rs"
 [dependencies]
 wtp-core = { path = "../wtp-core" }
 
-# GUI framework (pin to a specific Zed commit for API stability)
-# TODO: Determine the exact GPUI commit hash to pin before building
-# gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", rev = "TBD_PIN_COMMIT_HASH" }
+# GUI framework — pinned to Zed v0.229.0 for API stability
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", rev = "7c07887" }
 
-# System tray
-tray-icon = "0.19"
+# Platform abstraction (provides Application constructor)
+gpui_platform = { git = "https://github.com/zed-industries/zed", package = "gpui_platform", rev = "7c07887", features = ["font-kit"] }
 
-# Async runtime
+# System tray — v0.21 is latest stable; macOS requires main-thread creation
+tray-icon = "0.21"
+
+# Image processing for tray icon (decode PNG → RGBA)
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Async runtime (shared with wtp-core for create_workspace)
 tokio = { version = "1.40", features = ["rt-multi-thread", "macros"] }
 
 # Error handling
 anyhow = "1.0"
 
-# Utilities
+# Timer for tray event polling
 smol = "2.0"
+
+# For IndexMap used in config hosts
+indexmap = "2"
+
+# Embedded assets (match Zed's font loading pattern)
+rust-embed = { version = "8.4", features = ["include-exclude"] }
+
+# Grapheme-aware cursor movement for custom text input
+unicode-segmentation = "1.12"
+
+[dev-dependencies]
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
+syn = { version = "2.0", features = ["full", "visit"] }
