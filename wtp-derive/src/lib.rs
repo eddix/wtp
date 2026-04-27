@@ -2,7 +2,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Fields};
+use syn::{Data, DeriveInput, Fields, parse_macro_input};
 
 /// Derive macro to add group information to subcommand enums
 ///
@@ -46,7 +46,7 @@ pub fn derive_grouped_subcommand(input: TokenStream) -> TokenStream {
             }
             kebab.push(c.to_lowercase().next().unwrap());
         }
-        
+
         // Get the about text from doc comments
         let about = variant
             .attrs
@@ -124,11 +124,8 @@ pub fn derive_grouped_subcommand(input: TokenStream) -> TokenStream {
 
     // Generate help text printing
     let print_help_body = ordered_groups.iter().map(|group| {
-        let group_entries: Vec<_> = entries
-            .iter()
-            .filter(|(_, _, g)| g == group)
-            .collect();
-        
+        let group_entries: Vec<_> = entries.iter().filter(|(_, _, g)| g == group).collect();
+
         let max_name_len = group_entries
             .iter()
             .map(|(name, _, _)| name.len())

@@ -1,0 +1,50 @@
+[package]
+name = "wtp-gui"
+version = "0.1.0"
+edition = "2024"
+authors = ["eddix <eli.tech.arm@gmail.com>"]
+description = "GUI application for wtp — WorkTree for Polyrepo"
+license = "MIT"
+repository = "https://github.com/eddix/wtp"
+rust-version = "1.90"
+
+[[bin]]
+name = "wtp-gui"
+path = "src/main.rs"
+
+[dependencies]
+wtp-core = { path = "../wtp-core" }
+
+# GUI framework — pinned to Zed v0.229.0 for API stability
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", rev = "7c07887" }
+
+# Platform abstraction (provides Application constructor)
+gpui_platform = { git = "https://github.com/zed-industries/zed", package = "gpui_platform", rev = "7c07887", features = ["font-kit"] }
+
+# System tray — v0.21 is latest stable; macOS requires main-thread creation
+tray-icon = "0.21"
+
+# Image processing for tray icon (decode PNG → RGBA)
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Async runtime (shared with wtp-core for create_workspace)
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros"] }
+
+# Error handling
+anyhow = "1.0"
+
+# Timer for tray event polling
+smol = "2.0"
+
+# For IndexMap used in config hosts
+indexmap = "2"
+
+# Embedded assets (match Zed's font loading pattern)
+rust-embed = { version = "8.4", features = ["include-exclude"] }
+
+# Grapheme-aware cursor movement for custom text input
+unicode-segmentation = "1.12"
+
+[dev-dependencies]
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
+syn = { version = "2.0", features = ["full", "visit"] }

@@ -38,7 +38,7 @@ This gives you:
 ```bash
 git clone https://github.com/eddix/wtp
 cd wtp
-cargo install --path .
+cargo install --path wtp-cli
 ```
 
 ## Quick Start
@@ -552,31 +552,35 @@ cargo test
 ### Project Structure
 
 ```
-src/
+wtp-core/src/            # Core business logic (UI-independent)
+├── lib.rs               # Public API exports
+├── config.rs            # Configuration management
+├── error.rs             # Error types
+├── fence.rs             # Security fence
+├── git.rs               # Git command wrapper
+├── workspace.rs         # Workspace management
+└── worktree.rs          # Worktree data models
+
+wtp-cli/src/             # CLI application
 ├── main.rs              # Entry point
-├── cli/                 # CLI subcommands
-│   ├── mod.rs           # CLI entry point and help system
-│   ├── cd.rs
-│   ├── completions.rs   # Shell completion generation
-│   ├── create.rs
-│   ├── eject.rs         # Eject a worktree from workspace
-│   ├── fuzzy.rs         # Fuzzy finder integration
-│   ├── host.rs          # Host alias management
-│   ├── import.rs
-│   ├── ls.rs
-│   ├── remove.rs
-│   ├── shell_init.rs
-│   ├── status.rs
-│   ├── switch.rs
-│   └── theme.rs         # Unified styling for help output
-├── core/                # Core business logic
-│   ├── mod.rs
-│   ├── config.rs        # Configuration management
-│   ├── error.rs         # Error types
-│   ├── fence.rs         # Security fence
-│   ├── git.rs           # Git command wrapper
-│   ├── workspace.rs     # Workspace management
-│   └── worktree.rs      # Worktree data models
+└── cli/                 # CLI subcommands
+    ├── mod.rs           # CLI entry point and help system
+    ├── cd.rs
+    ├── completions.rs   # Shell completion generation
+    ├── create.rs
+    ├── eject.rs         # Eject a worktree from workspace
+    ├── fuzzy.rs         # Fuzzy finder integration
+    ├── git_status_fmt.rs # Git status formatting extension trait
+    ├── host.rs          # Host alias management
+    ├── import.rs
+    ├── ls.rs
+    ├── remove.rs
+    ├── shell_init.rs
+    ├── status.rs
+    ├── switch.rs
+    └── theme.rs         # Unified styling for help output
+
+wtp-gui/                 # GUI application (scaffold, GPUI-based)
 ```
 
 ## License
