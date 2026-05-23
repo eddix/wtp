@@ -156,14 +156,19 @@ Hook 脚本可以使用以下环境变量：
 ```bash
 #!/bin/bash
 echo "Initializing workspace: $WTP_WORKSPACE_NAME"
-cd "$WTP_WORKSPACE_PATH"
 
-# 创建 README
-cat > README.md << EOF
-# $WTP_WORKSPACE_NAME
+# 在 workspace 根写 CLAUDE.md / AGENTS.md，让 coding agent 把这个目录
+# 当作工作根，而不是钻进某个子 worktree。
+cat > "$WTP_WORKSPACE_PATH/CLAUDE.md" <<EOF
+# wtp workspace: $WTP_WORKSPACE_NAME
 
-Created: $(date)
+本目录是一个 **wtp workspace** —— 每个子目录都是为同一个任务 check
+out 的独立 \`git worktree\`。把本目录视为工作根，仅在执行 repo 内部
+命令时再 \`cd\` 到对应子目录。
 EOF
+
+# 同一份内容复制给 Codex 等其他 agent。
+cp "$WTP_WORKSPACE_PATH/CLAUDE.md" "$WTP_WORKSPACE_PATH/AGENTS.md"
 
 # 复制规范编码配置（示例）
 # cp ~/.templates/spec-coding.toml "$WTP_WORKSPACE_PATH/.spec.toml"

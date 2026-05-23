@@ -156,14 +156,20 @@ The hook script receives these environment variables:
 ```bash
 #!/bin/bash
 echo "Initializing workspace: $WTP_WORKSPACE_NAME"
-cd "$WTP_WORKSPACE_PATH"
 
-# Create a README
-cat > README.md << EOF
-# $WTP_WORKSPACE_NAME
+# Drop a CLAUDE.md / AGENTS.md so coding agents recognize the workspace
+# as the root of work instead of drifting into a single sub-worktree.
+cat > "$WTP_WORKSPACE_PATH/CLAUDE.md" <<EOF
+# wtp workspace: $WTP_WORKSPACE_NAME
 
-Created: $(date)
+This directory is a **wtp workspace** — each subdirectory is an
+independent \`git worktree\` checked out for the same task. Treat this
+directory as the root of work; \`cd\` into a subdirectory only when
+running repo-specific commands.
 EOF
+
+# Mirror the same context for Codex / other agents.
+cp "$WTP_WORKSPACE_PATH/CLAUDE.md" "$WTP_WORKSPACE_PATH/AGENTS.md"
 
 # Copy spec coding config (example)
 # cp ~/.templates/spec-coding.toml "$WTP_WORKSPACE_PATH/.spec.toml"
