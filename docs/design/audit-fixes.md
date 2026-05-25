@@ -1,4 +1,4 @@
-# FIX_DESIGN.md — Audit 修复设计文档
+# Audit Fixes — Design Document
 
 **日期**: 2026-03-28
 **范围**: wtp-core + wtp-cli（跳过 wtp-gui S7/S8/S9/W20-W24/A20-A23）

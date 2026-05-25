@@ -3,7 +3,7 @@
 > Reviewed: 2026-03-29
 > Reviewer: reviewer (dev-pipeline team)
 > Scope: All files under `wtp-gui/src/` + `wtp-gui/Cargo.toml`
-> Design doc: `GUI_DESIGN.md`
+> Design doc: [../design/gui-implementation.md](../design/gui-implementation.md)
 > Compile status: **PASS** (6 warnings)
 > Test status: **PASS** (all workspace tests pass; 0 GUI-specific tests)
 

@@ -1,4 +1,6 @@
-# FIX_REVIEW.md — Audit Fix Review Report
+# Audit Fixes — Review Report
+
+> Design doc: [../design/audit-fixes.md](../design/audit-fixes.md)
 
 **审查日期**: 2026-03-28
 **审查方式**: Codex GPT-5.4 (read-only, xhigh) + cargo check/test 验证
@@ -48,7 +50,7 @@
 
 ### H3. remove 路径遍历 — PARTIAL
 
-**证据**: 边界校验已添加 (remove.rs:45, remove.rs:81)，但越界条目仅 `continue` 跳过 (remove.rs:55, remove.rs:90)，不是 abort 整批操作。同时 metadata 仍在 remove.rs:139 批量删除。FIX_DESIGN.md 要求"任何 entry 越界则中止整个删除"，但实际实现只是跳过。
+**证据**: 边界校验已添加 (remove.rs:45, remove.rs:81)，但越界条目仅 `continue` 跳过 (remove.rs:55, remove.rs:90)，不是 abort 整批操作。同时 metadata 仍在 remove.rs:139 批量删除。the design doc 要求"任何 entry 越界则中止整个删除"，但实际实现只是跳过。
 
 **建议**: 将 `continue` 改为 `bail!` 或在循环前先做一轮全量校验。
 
@@ -78,7 +80,7 @@
 
 ### S5. 分支回退警告 — PARTIAL
 
-**证据**: 回退不再静默（添加了 `eprintln!`），但未添加 `tracing::warn!` (import.rs:98, switch.rs:161)。FIX_DESIGN.md 设计同时包含 `tracing::warn!` 和 `eprintln!`。
+**证据**: 回退不再静默（添加了 `eprintln!`），但未添加 `tracing::warn!` (import.rs:98, switch.rs:161)。the design doc 设计同时包含 `tracing::warn!` 和 `eprintln!`。
 
 **建议**: 补充 `tracing::warn!` 调用以支持结构化日志。
 
@@ -86,13 +88,13 @@
 
 **证据**: GitClient 仍全面使用 `std::process::Command` (git.rs:30, 181, 223, 252)。未添加 `spawn_blocking` 包装或 async 方法。
 
-**说明**: FIX_DESIGN.md 将此列为渐进式改进，可推迟。
+**说明**: the design doc 将此列为渐进式改进，可推迟。
 
 ### P3. ls --long 串行探测 — NOT_FIXED
 
 **证据**: ls.rs:44-116 仍然串行遍历所有 workspace。依赖 P2 提供 async 方法。
 
-**说明**: FIX_DESIGN.md 明确依赖 P2，可推迟。
+**说明**: the design doc 明确依赖 P2，可推迟。
 
 ### P5/A10. scan_git_repos 复杂度 — NOT_FIXED
 
@@ -110,11 +112,11 @@
 
 ### A8. to_string_lossy() 配置路径 — NOT_FIXED
 
-**证据**: config.rs:42, 47, 53 仍使用 lossy UTF-8 转换，未添加文档注释说明限制。FIX_DESIGN.md 设计为"本轮仅添加注释"。
+**证据**: config.rs:42, 47, 53 仍使用 lossy UTF-8 转换，未添加文档注释说明限制。the design doc 设计为"本轮仅添加注释"。
 
 ### P8. slug/display 临时分配 — NOT_FIXED
 
-**证据**: worktree.rs:65 的 `slug()` 仍然每次分配，未添加 `slug_ref()` 借用版本。FIX_DESIGN.md 设计了 `slug_ref` 但未标注到哪个 Batch。
+**证据**: worktree.rs:65 的 `slug()` 仍然每次分配，未添加 `slug_ref()` 借用版本。the design doc 设计了 `slug_ref` 但未标注到哪个 Batch。
 
 ---
 
@@ -168,7 +170,7 @@
 
 ## 6. 按设计跳过的项目
 
-以下项目在 FIX_DESIGN.md 中明确标注为"本轮不修改"或依赖其他项：
+以下项目在 the design doc 中明确标注为"本轮不修改"或依赖其他项：
 
 - W5, W12, W15, W18, W19 — 代码风格/重构风险高
 - A1, A6, A11, A12, A15, A16, A18, A19 — 影响小或需大改
