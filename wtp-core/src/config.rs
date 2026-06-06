@@ -165,12 +165,46 @@ pub struct GlobalConfig {
     /// Hooks configuration for workspace lifecycle events
     #[serde(default)]
     pub hooks: HooksConfig,
+
+    /// Display / output preferences
+    #[serde(default, skip_serializing_if = "DisplayConfig::is_default")]
+    pub display: DisplayConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostConfig {
     /// Root directory for this host
     pub root: PathBuf,
+}
+
+/// Display / output preferences.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisplayConfig {
+    /// When to colorize repo names in `wtp ls --long` by hashing each repo to a
+    /// stable, distinct color. See [`RepoColorMode`].
+    #[serde(default)]
+    pub repo_colors: RepoColorMode,
+}
+
+impl DisplayConfig {
+    /// Whether this is the default config (used to skip serializing it so we
+    /// don't sprinkle a `[display]` section into configs that never set one).
+    fn is_default(&self) -> bool {
+        *self == DisplayConfig::default()
+    }
+}
+
+/// Controls when `wtp ls --long` paints repo names with their hashed color.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RepoColorMode {
+    /// Color when stdout is a terminal and `NO_COLOR` is unset (default).
+    #[default]
+    Auto,
+    /// Always color, even when the output is piped or redirected.
+    Always,
+    /// Never color repo names.
+    Never,
 }
 
 /// Hooks configuration for workspace lifecycle events
@@ -197,6 +231,7 @@ impl Default for GlobalConfig {
             hosts: IndexMap::new(),
             default_host: None,
             hooks: HooksConfig::default(),
+            display: DisplayConfig::default(),
         }
     }
 }
@@ -303,10 +338,8 @@ pub fn sanitize_workspace_name(name: &str) -> String {
     // Pass 1: replace unsafe chars with `_`.
     let mut replaced = String::with_capacity(name.len());
     for ch in name.chars() {
-        let unsafe_char = matches!(
-            ch,
-            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
-        ) || (ch as u32) < 0x20;
+        let unsafe_char = matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+            || (ch as u32) < 0x20;
         replaced.push(if unsafe_char { '_' } else { ch });
     }
 
@@ -409,5 +442,54 @@ mod sanitize_workspace_name_tests {
         assert_eq!(sanitize_workspace_name("///"), "");
         assert_eq!(sanitize_workspace_name("..."), "");
         assert_eq!(sanitize_workspace_name("   "), "");
+    }
+}
+
+#[cfg(test)]
+mod display_config_tests {
+    use super::{DisplayConfig, GlobalConfig, RepoColorMode};
+
+    #[test]
+    fn defaults_to_auto() {
+        assert_eq!(DisplayConfig::default().repo_colors, RepoColorMode::Auto);
+    }
+
+    #[test]
+    fn missing_display_section_uses_default() {
+        let cfg: GlobalConfig = toml::from_str("workspace_root = \"/tmp/ws\"").unwrap();
+        assert_eq!(cfg.display.repo_colors, RepoColorMode::Auto);
+    }
+
+    #[test]
+    fn parses_repo_colors_modes() {
+        for (text, expected) in [
+            ("auto", RepoColorMode::Auto),
+            ("always", RepoColorMode::Always),
+            ("never", RepoColorMode::Never),
+        ] {
+            let toml = format!("workspace_root = \"/tmp/ws\"\n[display]\nrepo_colors = \"{text}\"");
+            let cfg: GlobalConfig = toml::from_str(&toml).unwrap();
+            assert_eq!(cfg.display.repo_colors, expected, "mode {text}");
+        }
+    }
+
+    #[test]
+    fn default_display_is_not_serialized() {
+        // A config left at defaults should not emit a [display] section.
+        let cfg = GlobalConfig::default();
+        let out = toml::to_string_pretty(&cfg).unwrap();
+        assert!(
+            !out.contains("[display]"),
+            "unexpected display section:\n{out}"
+        );
+    }
+
+    #[test]
+    fn customized_display_is_serialized() {
+        let mut cfg = GlobalConfig::default();
+        cfg.display.repo_colors = RepoColorMode::Never;
+        let out = toml::to_string_pretty(&cfg).unwrap();
+        assert!(out.contains("[display]"));
+        assert!(out.contains("repo_colors = \"never\""));
     }
 }

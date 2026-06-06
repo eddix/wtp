@@ -12,6 +12,7 @@ pub mod host;
 pub mod import;
 pub mod ls;
 pub mod remove;
+pub mod repo_color;
 pub mod shell_init;
 pub mod status;
 pub mod switch;

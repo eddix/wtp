@@ -74,6 +74,18 @@ impl RepoRef {
             .unwrap_or("unknown")
             .to_string()
     }
+
+    /// Case-insensitive substring match against the repo reference.
+    ///
+    /// Matches against the full display form (`host:path` for hosted repos,
+    /// the absolute path for absolute repos), which already contains the slug.
+    /// This lets a pattern like `i18n` match `byted:abc/i18n_sdk` as well as
+    /// a path-level namespace like `byted:i18n/web`.
+    pub fn matches(&self, pattern: &str) -> bool {
+        self.display()
+            .to_lowercase()
+            .contains(&pattern.to_lowercase())
+    }
 }
 
 /// Entry representing a single worktree in a workspace
@@ -175,6 +187,15 @@ impl WorktreeToml {
     /// Find a worktree by repo (any branch)
     pub fn find_by_repo(&self, repo: &RepoRef) -> Option<&WorktreeEntry> {
         self.worktrees.iter().find(|w| w.repo == *repo)
+    }
+
+    /// Whether any worktree's repo matches `pattern` (case-insensitive substring).
+    pub fn has_repo_matching(&self, pattern: &str) -> bool {
+        // Lower the pattern once here instead of per-worktree inside `matches`.
+        let pattern = pattern.to_lowercase();
+        self.worktrees
+            .iter()
+            .any(|w| w.repo.display().to_lowercase().contains(&pattern))
     }
 
     /// Find a worktree by repo slug (last component of the path)
@@ -282,5 +303,89 @@ impl WorktreeManager {
             self.save()?;
         }
         Ok(removed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hosted(host: &str, path: &str) -> RepoRef {
+        RepoRef::Hosted {
+            host: host.to_string(),
+            path: path.to_string(),
+        }
+    }
+
+    #[test]
+    fn matches_slug_substring() {
+        let repo = hosted("byted", "abc/i18n_sdk");
+        assert!(repo.matches("i18n"));
+        assert!(repo.matches("sdk"));
+        assert!(repo.matches("i18n_sdk"));
+    }
+
+    #[test]
+    fn matches_is_case_insensitive() {
+        let repo = hosted("byted", "abc/I18N_Web");
+        assert!(repo.matches("i18n"));
+        assert!(repo.matches("WEB"));
+    }
+
+    #[test]
+    fn matches_path_level_namespace() {
+        // Pattern hits a directory segment, not just the final slug.
+        let repo = hosted("byted", "i18n/web");
+        assert!(repo.matches("i18n"));
+    }
+
+    #[test]
+    fn matches_host_prefix() {
+        // display() includes the host alias, so it is matchable too.
+        let repo = hosted("byted", "abc/web");
+        assert!(repo.matches("byted"));
+    }
+
+    #[test]
+    fn matches_absolute_path() {
+        let repo = RepoRef::Absolute {
+            path: PathBuf::from("/home/u/codes/i18n_sdk"),
+        };
+        assert!(repo.matches("i18n"));
+        assert!(!repo.matches("nomatch"));
+    }
+
+    #[test]
+    fn does_not_match_unrelated() {
+        let repo = hosted("byted", "abc/payments");
+        assert!(!repo.matches("i18n"));
+    }
+
+    #[test]
+    fn has_repo_matching_scans_all_worktrees() {
+        let mut toml = WorktreeToml::new();
+        toml.add_worktree(WorktreeEntry::new(
+            hosted("byted", "abc/payments"),
+            "main".to_string(),
+            PathBuf::from("payments"),
+            None,
+            None,
+        ));
+        toml.add_worktree(WorktreeEntry::new(
+            hosted("byted", "abc/i18n_sdk"),
+            "main".to_string(),
+            PathBuf::from("i18n_sdk"),
+            None,
+            None,
+        ));
+        assert!(toml.has_repo_matching("i18n"));
+        assert!(toml.has_repo_matching("payments"));
+        assert!(!toml.has_repo_matching("nope"));
+    }
+
+    #[test]
+    fn has_repo_matching_empty_is_false() {
+        let toml = WorktreeToml::new();
+        assert!(!toml.has_repo_matching("anything"));
     }
 }
