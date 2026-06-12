@@ -312,6 +312,7 @@ pub enum Commands {
     Ls(ls::LsArgs),
     /// Remove a workspace
     #[cmd_group("Workspace Management")]
+    #[command(visible_alias = "rm")]
     Remove(remove::RemoveArgs),
     /// Show status of a workspace
     #[cmd_group("Workspace Management")]

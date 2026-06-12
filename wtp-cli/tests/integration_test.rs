@@ -156,7 +156,7 @@ fn test_ls_short_format() {
     );
 
     // Cleanup
-    let _ = run_wtp_with_home(&["rm", "test-short", "--force"], temp_home.path());
+    let _ = run_wtp_with_home(&["remove", "test-short", "--force"], temp_home.path());
 }
 
 #[test]
@@ -230,7 +230,7 @@ on_create = "{}"
     assert!(marker_file.exists(), "Hook marker file should exist");
 
     // Cleanup
-    let _ = run_wtp_with_home(&["rm", "test-hook-ws", "--force"], home_path);
+    let _ = run_wtp_with_home(&["remove", "test-hook-ws", "--force"], home_path);
 }
 
 #[test]
@@ -297,7 +297,7 @@ on_create = "{}"
     );
 
     // Cleanup
-    let _ = run_wtp_with_home(&["rm", "test-no-hook-ws", "--force"], home_path);
+    let _ = run_wtp_with_home(&["remove", "test-no-hook-ws", "--force"], home_path);
 }
 
 #[test]
@@ -421,7 +421,7 @@ fn test_create_workspace_sanitizes_slash() {
 
     // Cleanup
     let _ = run_wtp_with_home(
-        &["rm", "hotfix_update_task_issue_1234", "--force"],
+        &["remove", "hotfix_update_task_issue_1234", "--force"],
         home_path,
     );
 }
@@ -453,7 +453,7 @@ fn test_create_workspace_collapses_double_slash() {
         ls_out
     );
 
-    let _ = run_wtp_with_home(&["rm", "feat_foo", "--force"], home_path);
+    let _ = run_wtp_with_home(&["remove", "feat_foo", "--force"], home_path);
 }
 
 /// Seed a workspace's `.wtp/worktree.toml` with hosted repos so `ls --grep`
@@ -512,8 +512,8 @@ fn test_ls_grep_filters_by_repo_name() {
     let (_, out_pay, _) = run_wtp_with_home(&["ls", "--short", "--grep", "payments"], home);
     assert!(out_pay.contains("ws-pay") && !out_pay.contains("ws-i18n"));
 
-    let _ = run_wtp_with_home(&["rm", "ws-i18n", "--force"], home);
-    let _ = run_wtp_with_home(&["rm", "ws-pay", "--force"], home);
+    let _ = run_wtp_with_home(&["remove", "ws-i18n", "--force"], home);
+    let _ = run_wtp_with_home(&["remove", "ws-pay", "--force"], home);
 }
 
 #[test]
@@ -547,7 +547,7 @@ fn test_ls_grep_no_match_reports_clearly() {
         out2
     );
 
-    let _ = run_wtp_with_home(&["rm", "ws-only", "--force"], home);
+    let _ = run_wtp_with_home(&["remove", "ws-only", "--force"], home);
 }
 
 #[test]
@@ -570,8 +570,8 @@ fn test_ls_grep_empty_pattern_is_match_all() {
         out
     );
 
-    let _ = run_wtp_with_home(&["rm", "ws-has", "--force"], home);
-    let _ = run_wtp_with_home(&["rm", "ws-empty", "--force"], home);
+    let _ = run_wtp_with_home(&["remove", "ws-has", "--force"], home);
+    let _ = run_wtp_with_home(&["remove", "ws-empty", "--force"], home);
 }
 
 #[test]
@@ -726,5 +726,20 @@ fn test_import_same_repo_multiple_branches() {
 
     let (ok, out, err) = run_wtp_with_home(&["remove", "ws-multi", "--force"], home);
     assert!(ok, "rm failed: {} {}", out, err);
+    assert!(!ws_path.exists());
+}
+
+#[test]
+fn test_rm_is_alias_for_remove() {
+    let temp_home = setup_test_env();
+    let home = temp_home.path();
+
+    let (ok, out, err) = run_wtp_with_home(&["create", "ws-rm-alias", "--no-hook"], home);
+    assert!(ok, "create failed: {} {}", out, err);
+    let ws_path = home.join(".wtp").join("workspaces").join("ws-rm-alias");
+    assert!(ws_path.is_dir());
+
+    let (ok, out, err) = run_wtp_with_home(&["rm", "ws-rm-alias", "--force"], home);
+    assert!(ok, "rm alias failed: {} {}", out, err);
     assert!(!ws_path.exists());
 }
