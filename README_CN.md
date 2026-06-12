@@ -129,7 +129,23 @@ root = "~/codes/bitbucket.org"
 
 # 未指定时使用的默认 host
 default_host = "gh"
+
+# 显示偏好
+[display]
+# 在 `wtp ls --long` 中给 repo 名上色，颜色由 repo 名哈希得到且保持稳定
+#（同一个 repo 永远同一种颜色）。
+#   "auto"   - 输出为终端时上色（默认）
+#   "always" - 即使被管道/重定向也上色
+#   "never"  - 关闭 repo 上色
+repo_colors = "auto"
 ```
+
+### Repo 颜色
+
+在 `wtp ls --long` 里，每个 repo 名会被染上一个由名字哈希得到的稳定颜色。同一个
+repo 在不同 workspace 里永远是同一种颜色，于是你最常打交道的那几个 repo 一眼就能
+认出来。通过 `[display].repo_colors`（`auto` / `always` / `never`）控制；当输出不是
+终端或设置了 `NO_COLOR` 时会自动去色。
 
 ### Hooks
 
@@ -156,14 +172,19 @@ Hook 脚本可以使用以下环境变量：
 ```bash
 #!/bin/bash
 echo "Initializing workspace: $WTP_WORKSPACE_NAME"
-cd "$WTP_WORKSPACE_PATH"
 
-# 创建 README
-cat > README.md << EOF
-# $WTP_WORKSPACE_NAME
+# 在 workspace 根写 CLAUDE.md / AGENTS.md，让 coding agent 把这个目录
+# 当作工作根，而不是钻进某个子 worktree。
+cat > "$WTP_WORKSPACE_PATH/CLAUDE.md" <<EOF
+# wtp workspace: $WTP_WORKSPACE_NAME
 
-Created: $(date)
+本目录是一个 **wtp workspace** —— 每个子目录都是为同一个任务 check
+out 的独立 \`git worktree\`。把本目录视为工作根，仅在执行 repo 内部
+命令时再 \`cd\` 到对应子目录。
 EOF
+
+# 同一份内容复制给 Codex 等其他 agent。
+cp "$WTP_WORKSPACE_PATH/CLAUDE.md" "$WTP_WORKSPACE_PATH/AGENTS.md"
 
 # 复制规范编码配置（示例）
 # cp ~/.templates/spec-coding.toml "$WTP_WORKSPACE_PATH/.spec.toml"
@@ -190,8 +211,19 @@ chmod +x ~/.wtp/hooks/on-create.sh
 # 列出所有工作空间
 wtp ls
 
-# 详细列表
+# 详细列表（显示各 repo 的分支与状态）
 wtp ls --long
+
+# 只输出名字，每行一个（便于脚本与补全）
+wtp ls --short
+
+# 只列出"包含名字匹配 PATTERN 的 repo"的工作空间
+#（大小写不敏感子串）。便于按 repo 命名空间筛选，
+# 例如找出所有涉及 i18n_* 的工作空间。
+wtp ls --grep i18n
+
+# 可与任意输出格式组合
+wtp ls --long --grep i18n
 ```
 
 输出：

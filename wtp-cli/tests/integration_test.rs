@@ -456,6 +456,124 @@ fn test_create_workspace_collapses_double_slash() {
     let _ = run_wtp_with_home(&["rm", "feat_foo", "--force"], home_path);
 }
 
+/// Seed a workspace's `.wtp/worktree.toml` with hosted repos so `ls --grep`
+/// can be exercised without needing real git repositories on disk (the
+/// non-`--long` path only reads the toml, it runs no git commands).
+fn seed_worktrees(home: &std::path::Path, workspace: &str, repos: &[(&str, &str)]) {
+    let wt_dir = home
+        .join(".wtp")
+        .join("workspaces")
+        .join(workspace)
+        .join(".wtp");
+    std::fs::create_dir_all(&wt_dir).unwrap();
+    let mut toml = String::from("version = \"1\"\n");
+    for (i, (host, path)) in repos.iter().enumerate() {
+        let slug = path.rsplit('/').next().unwrap_or(path);
+        toml.push_str(&format!(
+            "\n[[worktrees]]\nid = \"00000000-0000-0000-0000-0000000000{:02}\"\n\
+             branch = \"main\"\nworktree_path = \"{}\"\n\
+             created_at = \"2026-01-01T00:00:00+00:00\"\n\
+             [worktrees.repo.hosted]\nhost = \"{}\"\npath = \"{}\"\n",
+            i, slug, host, path
+        ));
+    }
+    std::fs::write(wt_dir.join("worktree.toml"), toml).unwrap();
+}
+
+#[test]
+fn test_ls_grep_filters_by_repo_name() {
+    let temp_home = setup_test_env();
+    let home = temp_home.path();
+
+    let _ = run_wtp_with_home(&["create", "ws-i18n", "--no-hook"], home);
+    let _ = run_wtp_with_home(&["create", "ws-pay", "--no-hook"], home);
+    seed_worktrees(home, "ws-i18n", &[("byted", "oec/i18n_sdk")]);
+    seed_worktrees(home, "ws-pay", &[("byted", "oec/payments")]);
+
+    // Substring match keeps only the matching workspace.
+    let (ok, out, err) = run_wtp_with_home(&["ls", "--short", "--grep", "i18n"], home);
+    assert!(ok, "ls failed: {} {}", out, err);
+    assert!(out.contains("ws-i18n"), "expected ws-i18n, got: {}", out);
+    assert!(
+        !out.contains("ws-pay"),
+        "ws-pay should be filtered, got: {}",
+        out
+    );
+
+    // Case-insensitive.
+    let (_, out_ci, _) = run_wtp_with_home(&["ls", "--short", "--grep", "I18N"], home);
+    assert!(
+        out_ci.contains("ws-i18n"),
+        "case-insensitive failed, got: {}",
+        out_ci
+    );
+
+    // A different pattern selects the other workspace.
+    let (_, out_pay, _) = run_wtp_with_home(&["ls", "--short", "--grep", "payments"], home);
+    assert!(out_pay.contains("ws-pay") && !out_pay.contains("ws-i18n"));
+
+    let _ = run_wtp_with_home(&["rm", "ws-i18n", "--force"], home);
+    let _ = run_wtp_with_home(&["rm", "ws-pay", "--force"], home);
+}
+
+#[test]
+fn test_ls_grep_no_match_reports_clearly() {
+    let temp_home = setup_test_env();
+    let home = temp_home.path();
+
+    let _ = run_wtp_with_home(&["create", "ws-only", "--no-hook"], home);
+    seed_worktrees(home, "ws-only", &[("byted", "oec/i18n_sdk")]);
+
+    // Default (non-short) mode prints a clear message and exits 0.
+    let (ok, out, err) = run_wtp_with_home(&["ls", "--grep", "zzz_nomatch"], home);
+    assert!(ok, "ls failed: {} {}", out, err);
+    assert!(
+        out.contains("No workspaces contain a repo matching"),
+        "expected no-match message, got: {}",
+        out
+    );
+    assert!(
+        !out.contains("ws-only"),
+        "ws-only should not appear, got: {}",
+        out
+    );
+
+    // Short mode prints nothing on no match (script-friendly).
+    let (ok2, out2, _) = run_wtp_with_home(&["ls", "--short", "--grep", "zzz_nomatch"], home);
+    assert!(ok2);
+    assert!(
+        out2.trim().is_empty(),
+        "short no-match should be empty, got: {}",
+        out2
+    );
+
+    let _ = run_wtp_with_home(&["rm", "ws-only", "--force"], home);
+}
+
+#[test]
+fn test_ls_grep_empty_pattern_is_match_all() {
+    let temp_home = setup_test_env();
+    let home = temp_home.path();
+
+    // One workspace with a repo, one with none.
+    let _ = run_wtp_with_home(&["create", "ws-has", "--no-hook"], home);
+    let _ = run_wtp_with_home(&["create", "ws-empty", "--no-hook"], home);
+    seed_worktrees(home, "ws-has", &[("byted", "oec/i18n_sdk")]);
+
+    // An empty pattern behaves like plain `ls` (grep match-all semantics):
+    // it must NOT silently drop the repo-less workspace.
+    let (ok, out, err) = run_wtp_with_home(&["ls", "--short", "--grep", ""], home);
+    assert!(ok, "ls failed: {} {}", out, err);
+    assert!(
+        out.contains("ws-has") && out.contains("ws-empty"),
+        "empty pattern should list all workspaces, got: {}",
+        out
+    );
+
+    let _ = run_wtp_with_home(&["rm", "ws-has", "--force"], home);
+    let _ = run_wtp_with_home(&["rm", "ws-empty", "--force"], home);
+}
+
 #[test]
 fn test_create_workspace_rejects_pathological_name() {
     let temp_home = setup_test_env();
@@ -463,8 +581,7 @@ fn test_create_workspace_rejects_pathological_name() {
 
     // A name consisting only of separators sanitizes to an empty string
     // and must be rejected so we don't create a misnamed workspace.
-    let (success, stdout, stderr) =
-        run_wtp_with_home(&["create", "///", "--no-hook"], home_path);
+    let (success, stdout, stderr) = run_wtp_with_home(&["create", "///", "--no-hook"], home_path);
     assert!(
         !success,
         "create unexpectedly succeeded for '///'; stdout={} stderr={}",

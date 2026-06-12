@@ -15,10 +15,49 @@ pub struct LsArgs {
     /// Output only workspace names (for shell completion)
     #[arg(short, long)]
     short: bool,
+
+    /// Only show workspaces containing a repo matching PATTERN
+    /// (case-insensitive substring)
+    #[arg(
+        short,
+        long,
+        value_name = "PATTERN",
+        help = "Only show workspaces containing a repo matching PATTERN (case-insensitive substring)"
+    )]
+    grep: Option<String>,
 }
 
 pub async fn execute(args: LsArgs, manager: WorkspaceManager) -> anyhow::Result<()> {
-    let workspaces = manager.list_workspaces();
+    let mut workspaces = manager.list_workspaces();
+
+    // Optional repo-name filter: keep a workspace only if at least one of its
+    // worktrees references a repo matching the pattern. Loading each workspace's
+    // worktree.toml here is cheap (no git commands), so the expensive `--long`
+    // probing still only happens for the survivors — which then reload the same
+    // tiny file. An empty pattern is treated as match-all (grep semantics), so
+    // it leaves the listing untouched rather than dropping repo-less workspaces.
+    if let Some(pattern) = &args.grep
+        && !pattern.is_empty()
+    {
+        // A workspace whose worktree.toml can't be loaded can't be matched, so
+        // it is excluded from filtered results (the unfiltered listing instead
+        // surfaces such a workspace as an error).
+        workspaces.retain(|ws| {
+            WorktreeManager::load(&ws.path)
+                .map(|m| m.config().has_repo_matching(pattern))
+                .unwrap_or(false)
+        });
+
+        if workspaces.is_empty() {
+            if !args.short {
+                println!(
+                    "{}",
+                    format!("No workspaces contain a repo matching '{}'.", pattern).dimmed()
+                );
+            }
+            return Ok(());
+        }
+    }
 
     if workspaces.is_empty() {
         if !args.short {
@@ -40,6 +79,10 @@ pub async fn execute(args: LsArgs, manager: WorkspaceManager) -> anyhow::Result<
     } else if args.long {
         // Detailed listing with repo details
         let git = GitClient::new();
+        // Resolve the TTY/NO_COLOR decision once for the whole listing rather
+        // than re-checking per repo row.
+        let colorize =
+            crate::cli::repo_color::should_color(manager.global_config().display.repo_colors);
 
         for (i, ws) in workspaces.iter().enumerate() {
             if i > 0 {
@@ -62,11 +105,13 @@ pub async fn execute(args: LsArgs, manager: WorkspaceManager) -> anyhow::Result<
                         for wt in worktrees {
                             let wt_full_path = ws.path.join(&wt.worktree_path);
                             let repo_display = wt.repo.display();
+                            let repo_cell =
+                                crate::cli::repo_color::paint_repo(&repo_display, 30, colorize);
 
                             if !wt_full_path.exists() {
                                 println!(
-                                    "  {:<30} {:<20} {}",
-                                    repo_display,
+                                    "  {} {:<20} {}",
+                                    repo_cell,
                                     wt.branch.cyan(),
                                     "? missing".red()
                                 );
@@ -107,8 +152,8 @@ pub async fn execute(args: LsArgs, manager: WorkspaceManager) -> anyhow::Result<
                             };
 
                             println!(
-                                "  {:<30} {:<20} {}{}",
-                                repo_display,
+                                "  {} {:<20} {}{}",
+                                repo_cell,
                                 wt.branch.cyan(),
                                 status_str,
                                 base_str

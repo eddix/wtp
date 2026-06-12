@@ -129,7 +129,24 @@ root = "~/codes/bitbucket.org"
 
 # Default host to use when none specified
 default_host = "gh"
+
+# Display preferences
+[display]
+# Colorize repo names in `wtp ls --long`, giving each repo a stable color
+# derived from its name (so the same repo is always the same color).
+#   "auto"   - color when the output is a terminal (default)
+#   "always" - color even when piped/redirected
+#   "never"  - disable repo colors
+repo_colors = "auto"
 ```
+
+### Repo Colors
+
+In `wtp ls --long`, each repo name is tinted with a stable color hashed from its
+name. The same repo always gets the same color across workspaces, so the few
+repos you work with most become easy to pick out at a glance. Control it with
+`[display].repo_colors` (`auto` / `always` / `never`); colors are stripped
+automatically when output isn't a terminal or when `NO_COLOR` is set.
 
 ### Hooks
 
@@ -156,14 +173,20 @@ The hook script receives these environment variables:
 ```bash
 #!/bin/bash
 echo "Initializing workspace: $WTP_WORKSPACE_NAME"
-cd "$WTP_WORKSPACE_PATH"
 
-# Create a README
-cat > README.md << EOF
-# $WTP_WORKSPACE_NAME
+# Drop a CLAUDE.md / AGENTS.md so coding agents recognize the workspace
+# as the root of work instead of drifting into a single sub-worktree.
+cat > "$WTP_WORKSPACE_PATH/CLAUDE.md" <<EOF
+# wtp workspace: $WTP_WORKSPACE_NAME
 
-Created: $(date)
+This directory is a **wtp workspace** — each subdirectory is an
+independent \`git worktree\` checked out for the same task. Treat this
+directory as the root of work; \`cd\` into a subdirectory only when
+running repo-specific commands.
 EOF
+
+# Mirror the same context for Codex / other agents.
+cp "$WTP_WORKSPACE_PATH/CLAUDE.md" "$WTP_WORKSPACE_PATH/AGENTS.md"
 
 # Copy spec coding config (example)
 # cp ~/.templates/spec-coding.toml "$WTP_WORKSPACE_PATH/.spec.toml"
@@ -195,6 +218,14 @@ wtp ls --long
 
 # Names only, one per line (useful for scripts and shell completion)
 wtp ls --short
+
+# Only workspaces that contain a repo whose name matches a pattern
+# (case-insensitive substring). Handy for finding every workspace
+# touching a given repo namespace, e.g. all i18n_* repos.
+wtp ls --grep i18n
+
+# Combine with any output format
+wtp ls --long --grep i18n
 ```
 
 Output:

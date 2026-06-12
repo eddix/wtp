@@ -80,7 +80,9 @@ _wtp() {
                         '-l[Show detailed information]' \
                         '--long[Show detailed information]' \
                         '-s[Output only workspace names]' \
-                        '--short[Output only workspace names]'
+                        '--short[Output only workspace names]' \
+                        '-g[Filter by repo name substring]:pattern:' \
+                        '--grep[Filter by repo name substring]:pattern:'
                     ;;
                 remove)
                     _arguments \
@@ -215,7 +217,7 @@ _wtp_completions() {
             fi
             ;;
         ls)
-            COMPREPLY=($(compgen -W "-l --long -s --short" -- "$cur"))
+            COMPREPLY=($(compgen -W "-l --long -s --short -g --grep" -- "$cur"))
             ;;
         remove)
             if [[ "$cur" == -* ]]; then
@@ -288,6 +290,7 @@ complete -c wtp -n '__fish_seen_subcommand_from create' -l no-hook -d 'Skip post
 # ls
 complete -c wtp -n '__fish_seen_subcommand_from ls' -s l -l long -d 'Show detailed information'
 complete -c wtp -n '__fish_seen_subcommand_from ls' -s s -l short -d 'Output only workspace names'
+complete -c wtp -n '__fish_seen_subcommand_from ls' -s g -l grep -d 'Filter by repo name substring' -r
 
 # remove
 complete -c wtp -n '__fish_seen_subcommand_from remove' -s f -l force -d 'Force removal'

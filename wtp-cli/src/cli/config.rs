@@ -67,6 +67,16 @@ pub async fn execute(_args: ConfigArgs, manager: WorkspaceManager) -> anyhow::Re
     } else {
         println!("  {}: {}", "on_create".green(), "(not set)".dimmed());
     }
+    println!();
+
+    // Display preferences
+    let repo_colors = match config.display.repo_colors {
+        wtp_core::RepoColorMode::Auto => "auto",
+        wtp_core::RepoColorMode::Always => "always",
+        wtp_core::RepoColorMode::Never => "never",
+    };
+    println!("{}", "Display".cyan());
+    println!("  {}: {}", "repo_colors".green(), repo_colors);
 
     Ok(())
 }

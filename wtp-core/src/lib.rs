@@ -10,7 +10,9 @@ pub mod git;
 pub mod workspace;
 pub mod worktree;
 
-pub use config::{GlobalConfig, LoadedConfig, sanitize_workspace_name};
+pub use config::{
+    DisplayConfig, GlobalConfig, LoadedConfig, RepoColorMode, sanitize_workspace_name,
+};
 pub use error::Result;
 pub use git::{FullGitStatus, GitClient, GitStatus};
 pub use workspace::{CreateResult, WorkspaceInfo, WorkspaceManager};
