@@ -284,11 +284,22 @@ fn try_show_help(root: &clap::Command, args: &[String]) -> bool {
     false
 }
 
+/// Version string with build metadata, embedded by build.rs:
+/// `0.1.0 (built at 2026-06-12_15:04:05, commit 8639996)`
+const LONG_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (built at ",
+    env!("WTP_BUILD_TIME"),
+    ", commit ",
+    env!("WTP_BUILD_COMMIT"),
+    ")"
+);
+
 /// WorkTree for Polyrepo - Manage multiple git worktrees across repositories
 #[derive(Parser, Debug)]
 #[command(name = "wtp")]
 #[command(disable_help_flag = true, disable_help_subcommand = true)]
-#[command(version)]
+#[command(version = LONG_VERSION)]
 #[command(color = clap::ColorChoice::Always)]
 pub struct Cli {
     #[command(subcommand)]

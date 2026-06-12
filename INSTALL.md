@@ -190,7 +190,14 @@ wtp completions fish | source
 安装完成后，运行以下命令验证安装是否成功：
 
 ```bash
+wtp --version
 wtp --help
+```
+
+`wtp --version` 会显示版本号和构建信息（构建时间与 commit），例如：
+
+```
+wtp 0.1.0 (built at 2026-06-12_15:23:51, commit 8639996)
 ```
 
 如果显示帮助信息，说明安装成功！

@@ -71,6 +71,13 @@ fn test_wtp_version() {
     let (success, stdout, _) = run_wtp_with_home(&["--version"], temp_home.path());
     assert!(success);
     assert!(stdout.contains("0.1.0"));
+    // Build metadata embedded by build.rs, e.g.
+    // "wtp 0.1.0 (built at 2026-06-12_15:23:51, commit 8639996)"
+    assert!(
+        stdout.contains("built at ") && stdout.contains("commit "),
+        "expected build metadata in version, got: {}",
+        stdout
+    );
 }
 
 #[test]
