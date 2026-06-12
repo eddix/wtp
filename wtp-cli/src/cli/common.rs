@@ -37,6 +37,11 @@ pub fn check_workspace_boundary(
 
 /// Create a worktree for a repository in a workspace.
 /// Returns (absolute_worktree_path, WorktreeEntry).
+///
+/// With `with_branch_name` the worktree directory is named `<repo>@<branch>`,
+/// allowing multiple branches of the same repository to coexist in one
+/// workspace. Without it, a repository can only have one worktree per
+/// workspace and the directory is named after the repo slug alone.
 pub fn create_worktree_in_workspace(
     git: &GitClient,
     repo_root: &Path,
@@ -45,20 +50,41 @@ pub fn create_worktree_in_workspace(
     branch: &str,
     base: &str,
     worktree_manager: &WorktreeManager,
+    with_branch_name: bool,
 ) -> anyhow::Result<(PathBuf, WorktreeEntry)> {
-    if let Some(existing) = worktree_manager.config().find_by_repo(repo_ref) {
+    if let Some(existing) = worktree_manager
+        .config()
+        .find_by_repo_and_branch(repo_ref, branch)
+    {
         anyhow::bail!(
-            "Repository '{}' is already in this workspace with branch '{}'.\n\
-             Each repository can only have one worktree per workspace.\n\
-             Existing worktree: {}",
+            "Repository '{}' already has a worktree for branch '{}' in this workspace: {}",
             repo_ref.display().yellow(),
-            existing.branch.yellow(),
+            branch.yellow(),
             existing.worktree_path.display()
         );
     }
 
+    if !with_branch_name && let Some(existing) = worktree_manager.config().find_by_repo(repo_ref) {
+        anyhow::bail!(
+            "Repository '{}' is already in this workspace with branch '{}'.\n\
+             Existing worktree: {}\n\
+             To add another branch of the same repository, re-run with {} \
+             and {} — the new worktree directory will be named '{}'.",
+            repo_ref.display().yellow(),
+            existing.branch.yellow(),
+            existing.worktree_path.display(),
+            "-b <branch>".bold(),
+            "--with-branch-name".bold(),
+            format!("{}@<branch>", repo_ref.slug()).cyan()
+        );
+    }
+
     let repo_slug = repo_ref.slug();
-    let worktree_path_rel = worktree_manager.generate_worktree_path(&repo_slug);
+    let worktree_path_rel = if with_branch_name {
+        worktree_manager.generate_worktree_path_with_branch(&repo_slug, branch)
+    } else {
+        worktree_manager.generate_worktree_path(&repo_slug)
+    };
     let worktree_path_abs = workspace_path.join(&worktree_path_rel);
 
     println!(

@@ -12,7 +12,8 @@ use wtp_core::{GitClient, WorkspaceManager, WorktreeManager};
 
 #[derive(Args, Debug)]
 pub struct EjectArgs {
-    /// Repository slug or display name to eject (e.g., "my-repo" or "gh:owner/repo")
+    /// Worktree to eject: directory name, repo slug, or display name
+    /// (e.g., "my-repo", "my-repo@feature-x", or "gh:owner/repo")
     #[arg(value_name = "REPO")]
     pub repo: Option<String>,
 
@@ -46,9 +47,12 @@ pub async fn execute(args: EjectArgs, manager: WorkspaceManager) -> anyhow::Resu
     // Find the worktree entry
     let entry = worktree_manager
         .config()
-        .find_by_slug(&slug)
+        .find_by_slug(&slug)?
         .ok_or_else(|| {
-            let available: Vec<String> = worktrees.iter().map(|w| w.repo.slug()).collect();
+            let available: Vec<String> = worktrees
+                .iter()
+                .map(|w| w.worktree_path.display().to_string())
+                .collect();
             anyhow::anyhow!(
                 "Worktree '{}' not found in workspace.\nAvailable: {}",
                 slug,
@@ -62,8 +66,9 @@ pub async fn execute(args: EjectArgs, manager: WorkspaceManager) -> anyhow::Resu
     let worktree_path_abs = workspace_path.join(&worktree_path_rel);
     // H2 fix: validate worktree path is within workspace
     wtp_core::fence::validate_within_boundary(&workspace_path, &worktree_path_abs)?;
-    // Determine slug used for removal (match by repo slug)
-    let removal_slug = entry.repo.slug();
+    // Remove by directory name — always unique, even when the same repo has
+    // worktrees for several branches in this workspace.
+    let removal_key = worktree_path_rel.display().to_string();
 
     println!("Ejecting from workspace: {}\n", workspace_name.cyan());
     println!("  {:<14} {}", "Repository:".bold(), repo_display.cyan());
@@ -107,7 +112,7 @@ pub async fn execute(args: EjectArgs, manager: WorkspaceManager) -> anyhow::Resu
 
     // Remove from worktree.toml
     let mut worktree_manager = WorktreeManager::load(&workspace_path)?;
-    worktree_manager.remove_worktree(&removal_slug)?;
+    worktree_manager.remove_worktree(&removal_key)?;
 
     println!("{} Worktree ejected successfully.", "✓".green().bold());
 
@@ -123,17 +128,15 @@ fn select_worktree_interactively(worktrees: &[wtp_core::WorktreeEntry]) -> anyho
         );
     }
 
+    // Key by worktree directory name — unique even when the same repo has
+    // worktrees for several branches in this workspace.
     let items: Vec<(String, String)> = worktrees
         .iter()
         .map(|w| {
+            let dir = w.worktree_path.display().to_string();
             (
-                w.repo.slug(),
-                format!(
-                    "{}    ({}, branch: {})",
-                    w.repo.slug(),
-                    w.repo.display(),
-                    w.branch
-                ),
+                dir.clone(),
+                format!("{}    ({}, branch: {})", dir, w.repo.display(), w.branch),
             )
         })
         .collect();

@@ -32,6 +32,11 @@ pub struct ImportArgs {
     /// Base reference to create branch from
     #[arg(short = 'B', long)]
     base: Option<String>,
+
+    /// Name the worktree directory '<repo>@<branch>' so multiple branches of
+    /// the same repository can coexist in one workspace
+    #[arg(long)]
+    with_branch_name: bool,
 }
 
 pub async fn execute(args: ImportArgs, manager: WorkspaceManager) -> anyhow::Result<()> {
@@ -122,6 +127,7 @@ pub async fn execute(args: ImportArgs, manager: WorkspaceManager) -> anyhow::Res
         &branch,
         &base,
         &worktree_manager,
+        args.with_branch_name,
     )?;
 
     // Record in worktree.toml

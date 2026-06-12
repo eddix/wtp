@@ -468,13 +468,40 @@ For example:
 ```
 
 **Constraints:**
-- Each repository can only have **one** worktree per workspace
-- The worktree directory name is the repository slug (last component of the repo path)
+- By default, each repository has **one** worktree per workspace, named after
+  the repository slug (last component of the repo path)
 - If you try to add a duplicate, you'll get an error like:
   ```
   Error: Repository 'my-project' is already in this workspace with branch 'feature-x'.
-  Each repository can only have one worktree per workspace.
+  To add another branch of the same repository, re-run with -b <branch> and --with-branch-name.
   ```
+
+### Multiple Branches of the Same Repository
+
+To work on several branches of one repository side by side (e.g. applying the
+same change to multiple release branches), pass `--with-branch-name` to
+`wtp import` or `wtp switch`. The worktree directory is then named
+`<repo_slug>@<branch>`:
+
+```bash
+wtp import company/project -b release-area-a-dev                    # project/
+wtp import company/project -b release-area-b-dev --with-branch-name # project@release-area-b-dev/
+```
+
+```
+~/.wtp/workspaces/releases/
+├── project/                        # branch: release-area-a-dev
+└── project@release-area-b-dev/     # branch: release-area-b-dev
+```
+
+Notes:
+- Branch name separators like `/` are sanitized in the directory name
+  (`feature/x` → `project@feature_x`)
+- `wtp eject` accepts the worktree directory name to pick an exact worktree
+  (e.g. `wtp eject project@release-area-b-dev`); a bare repo slug that matches
+  several worktrees is rejected as ambiguous
+- All worktrees of one repository share the same git refs, stash, and config —
+  this is standard `git worktree` behavior
 
 ### Host Aliases
 

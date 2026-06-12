@@ -593,3 +593,138 @@ fn test_create_workspace_rejects_pathological_name() {
         stderr
     );
 }
+
+/// Create a real git repository with an initial commit on `main`.
+fn init_git_repo(dir: &std::path::Path) {
+    let run = |args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("failed to run git");
+        assert!(
+            out.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    run(&["init", "-b", "main"]);
+    run(&["config", "user.email", "test@example.com"]);
+    run(&["config", "user.name", "Test"]);
+    std::fs::write(dir.join("README.md"), "hello").unwrap();
+    run(&["add", "."]);
+    run(&["commit", "-m", "init"]);
+}
+
+#[test]
+fn test_import_same_repo_multiple_branches() {
+    let temp_home = setup_test_env();
+    let home = temp_home.path();
+
+    let repo_dir = TempDir::new().unwrap();
+    let repo_path = repo_dir.path();
+    init_git_repo(repo_path);
+    let repo_str = repo_path.to_str().unwrap();
+    let slug = repo_path.file_name().unwrap().to_str().unwrap();
+
+    let (ok, out, err) = run_wtp_with_home(&["create", "ws-multi", "--no-hook"], home);
+    assert!(ok, "create failed: {} {}", out, err);
+    let ws_path = home.join(".wtp").join("workspaces").join("ws-multi");
+
+    // First import: directory named after the repo slug, as before.
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &["import", "--repo", repo_str, "-b", "release-area-a-dev"],
+        Some(&ws_path),
+        home,
+    );
+    assert!(ok, "first import failed: {} {}", out, err);
+    assert!(ws_path.join(slug).is_dir());
+
+    // Same repo again without --with-branch-name: clear error with a hint.
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &["import", "--repo", repo_str, "-b", "release-area-b-dev"],
+        Some(&ws_path),
+        home,
+    );
+    assert!(!ok, "unflagged second import should fail");
+    let combined = format!("{} {}", out, err);
+    assert!(
+        combined.contains("--with-branch-name"),
+        "expected --with-branch-name hint, got: {}",
+        combined
+    );
+
+    // Same repo + same branch even with the flag: rejected.
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &[
+            "import",
+            "--repo",
+            repo_str,
+            "-b",
+            "release-area-a-dev",
+            "--with-branch-name",
+        ],
+        Some(&ws_path),
+        home,
+    );
+    assert!(!ok, "duplicate branch import should fail");
+    let combined = format!("{} {}", out, err);
+    assert!(
+        combined.contains("already has a worktree for branch"),
+        "expected duplicate-branch error, got: {}",
+        combined
+    );
+
+    // Same repo, different branch, with the flag: directory is slug@branch.
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &[
+            "import",
+            "--repo",
+            repo_str,
+            "-b",
+            "release-area-b-dev",
+            "--with-branch-name",
+        ],
+        Some(&ws_path),
+        home,
+    );
+    assert!(ok, "flagged import failed: {} {}", out, err);
+    let branch_dir = format!("{}@release-area-b-dev", slug);
+    assert!(ws_path.join(&branch_dir).is_dir());
+
+    // Status lists both worktrees of the same repo.
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["status"], Some(&ws_path), home);
+    assert!(ok, "status failed: {} {}", out, err);
+    assert!(
+        out.contains("release-area-a-dev") && out.contains("release-area-b-dev"),
+        "status should list both branches, got: {}",
+        out
+    );
+
+    // Eject by directory name removes only that worktree.
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["eject", &branch_dir], Some(&ws_path), home);
+    assert!(ok, "eject failed: {} {}", out, err);
+    assert!(!ws_path.join(&branch_dir).exists());
+    assert!(ws_path.join(slug).is_dir());
+
+    // Re-import branch b so the workspace again holds two worktrees of the
+    // same repo, then remove the whole workspace (exercises batch cleanup).
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &[
+            "import",
+            "--repo",
+            repo_str,
+            "-b",
+            "release-area-b-dev",
+            "--with-branch-name",
+        ],
+        Some(&ws_path),
+        home,
+    );
+    assert!(ok, "re-import failed: {} {}", out, err);
+
+    let (ok, out, err) = run_wtp_with_home(&["remove", "ws-multi", "--force"], home);
+    assert!(ok, "rm failed: {} {}", out, err);
+    assert!(!ws_path.exists());
+}

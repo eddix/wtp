@@ -64,7 +64,7 @@ Before attaching a repo:
 - verify whether you are in a git repository if planning to use `wtp switch`
 - verify whether you are in a workspace directory if planning to use `wtp import` (it always auto-detects the workspace from the current directory — there is no flag to override this)
 - inspect existing workspace contents if there is risk of duplicate attachment
-- remember that one repository can only have one worktree per workspace
+- remember that by default one repository has one worktree per workspace; attaching more branches of the same repo requires `--with-branch-name` (see below)
 
 ## Branch behavior
 
@@ -73,6 +73,28 @@ Before attaching a repo:
 - If a branch already exists, `wtp` may reuse it instead of creating a new one
 
 The agent should avoid assuming details that `wtp` can determine itself unless the user explicitly requested a branch or base.
+
+## Multiple branches of the same repository
+
+A workspace can hold several worktrees of one repository — one per branch — for
+tasks like applying the same change to multiple release branches. This requires
+an explicit flag on `wtp import` or `wtp switch`:
+
+```bash
+wtp import company/project -b release-area-a-dev                    # first: dir is project/
+wtp import company/project -b release-area-b-dev --with-branch-name # second: dir is project@release-area-b-dev/
+```
+
+Rules:
+
+- The extra worktree directory is named `<repo_slug>@<branch>`; separators like
+  `/` in the branch name are sanitized (`feature/x` → `project@feature_x`)
+- Re-attaching the same repo without `--with-branch-name` fails with an error
+  that suggests the flag — surface that hint instead of improvising
+- The same repo + same branch combination is always rejected (git only allows a
+  branch to be checked out in one worktree)
+- All worktrees of one repository share git refs, stash, and config (standard
+  `git worktree` semantics)
 
 ## Recommended flow
 

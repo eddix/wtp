@@ -466,13 +466,38 @@ Worktree 的组织方式为：
 ```
 
 **约束：**
-- 每个仓库在每个工作空间中只能有**一个** worktree
-- Worktree 目录名为仓库 slug（仓库路径的最后一段）
+- 默认情况下，每个仓库在每个工作空间中只有**一个** worktree，目录名为仓库
+  slug（仓库路径的最后一段）
 - 如果尝试重复添加，会得到如下错误：
   ```
   Error: Repository 'my-project' is already in this workspace with branch 'feature-x'.
-  Each repository can only have one worktree per workspace.
+  To add another branch of the same repository, re-run with -b <branch> and --with-branch-name.
   ```
+
+### 同一仓库的多个分支
+
+如果需要在同一个工作空间中并排操作一个仓库的多个分支（例如把同一个修改应用到
+多个 release 分支），给 `wtp import` 或 `wtp switch` 加上 `--with-branch-name`，
+worktree 目录会命名为 `<repo_slug>@<branch>`：
+
+```bash
+wtp import company/project -b release-area-a-dev                    # project/
+wtp import company/project -b release-area-b-dev --with-branch-name # project@release-area-b-dev/
+```
+
+```
+~/.wtp/workspaces/releases/
+├── project/                        # 分支：release-area-a-dev
+└── project@release-area-b-dev/     # 分支：release-area-b-dev
+```
+
+注意：
+- 分支名中的 `/` 等分隔符在目录名中会被转义（`feature/x` → `project@feature_x`）
+- `wtp eject` 可以用 worktree 目录名精确指定要弹出的 worktree
+  （如 `wtp eject project@release-area-b-dev`）；裸仓库 slug 匹配到多个
+  worktree 时会报歧义错误
+- 同一仓库的所有 worktree 共享同一套 git refs、stash 和 config——这是
+  `git worktree` 的标准行为
 
 ### Host 别名
 
