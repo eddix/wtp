@@ -71,6 +71,13 @@ fn test_wtp_version() {
     let (success, stdout, _) = run_wtp_with_home(&["--version"], temp_home.path());
     assert!(success);
     assert!(stdout.contains("0.1.0"));
+    // Build metadata embedded by build.rs, e.g.
+    // "wtp 0.1.0 (built at 2026-06-12_15:23:51, commit 8639996)"
+    assert!(
+        stdout.contains("built at ") && stdout.contains("commit "),
+        "expected build metadata in version, got: {}",
+        stdout
+    );
 }
 
 #[test]
@@ -156,7 +163,7 @@ fn test_ls_short_format() {
     );
 
     // Cleanup
-    let _ = run_wtp_with_home(&["rm", "test-short", "--force"], temp_home.path());
+    let _ = run_wtp_with_home(&["remove", "test-short", "--force"], temp_home.path());
 }
 
 #[test]
@@ -230,7 +237,7 @@ on_create = "{}"
     assert!(marker_file.exists(), "Hook marker file should exist");
 
     // Cleanup
-    let _ = run_wtp_with_home(&["rm", "test-hook-ws", "--force"], home_path);
+    let _ = run_wtp_with_home(&["remove", "test-hook-ws", "--force"], home_path);
 }
 
 #[test]
@@ -297,7 +304,7 @@ on_create = "{}"
     );
 
     // Cleanup
-    let _ = run_wtp_with_home(&["rm", "test-no-hook-ws", "--force"], home_path);
+    let _ = run_wtp_with_home(&["remove", "test-no-hook-ws", "--force"], home_path);
 }
 
 #[test]
@@ -421,7 +428,7 @@ fn test_create_workspace_sanitizes_slash() {
 
     // Cleanup
     let _ = run_wtp_with_home(
-        &["rm", "hotfix_update_task_issue_1234", "--force"],
+        &["remove", "hotfix_update_task_issue_1234", "--force"],
         home_path,
     );
 }
@@ -453,7 +460,7 @@ fn test_create_workspace_collapses_double_slash() {
         ls_out
     );
 
-    let _ = run_wtp_with_home(&["rm", "feat_foo", "--force"], home_path);
+    let _ = run_wtp_with_home(&["remove", "feat_foo", "--force"], home_path);
 }
 
 /// Seed a workspace's `.wtp/worktree.toml` with hosted repos so `ls --grep`
@@ -512,8 +519,8 @@ fn test_ls_grep_filters_by_repo_name() {
     let (_, out_pay, _) = run_wtp_with_home(&["ls", "--short", "--grep", "payments"], home);
     assert!(out_pay.contains("ws-pay") && !out_pay.contains("ws-i18n"));
 
-    let _ = run_wtp_with_home(&["rm", "ws-i18n", "--force"], home);
-    let _ = run_wtp_with_home(&["rm", "ws-pay", "--force"], home);
+    let _ = run_wtp_with_home(&["remove", "ws-i18n", "--force"], home);
+    let _ = run_wtp_with_home(&["remove", "ws-pay", "--force"], home);
 }
 
 #[test]
@@ -547,7 +554,7 @@ fn test_ls_grep_no_match_reports_clearly() {
         out2
     );
 
-    let _ = run_wtp_with_home(&["rm", "ws-only", "--force"], home);
+    let _ = run_wtp_with_home(&["remove", "ws-only", "--force"], home);
 }
 
 #[test]
@@ -570,8 +577,8 @@ fn test_ls_grep_empty_pattern_is_match_all() {
         out
     );
 
-    let _ = run_wtp_with_home(&["rm", "ws-has", "--force"], home);
-    let _ = run_wtp_with_home(&["rm", "ws-empty", "--force"], home);
+    let _ = run_wtp_with_home(&["remove", "ws-has", "--force"], home);
+    let _ = run_wtp_with_home(&["remove", "ws-empty", "--force"], home);
 }
 
 #[test]
@@ -592,4 +599,154 @@ fn test_create_workspace_rejects_pathological_name() {
         "expected rejection message about sanitization, got stderr: {}",
         stderr
     );
+}
+
+/// Create a real git repository with an initial commit on `main`.
+fn init_git_repo(dir: &std::path::Path) {
+    let run = |args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("failed to run git");
+        assert!(
+            out.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    run(&["init", "-b", "main"]);
+    run(&["config", "user.email", "test@example.com"]);
+    run(&["config", "user.name", "Test"]);
+    std::fs::write(dir.join("README.md"), "hello").unwrap();
+    run(&["add", "."]);
+    run(&["commit", "-m", "init"]);
+}
+
+#[test]
+fn test_import_same_repo_multiple_branches() {
+    let temp_home = setup_test_env();
+    let home = temp_home.path();
+
+    let repo_dir = TempDir::new().unwrap();
+    let repo_path = repo_dir.path();
+    init_git_repo(repo_path);
+    let repo_str = repo_path.to_str().unwrap();
+    let slug = repo_path.file_name().unwrap().to_str().unwrap();
+
+    let (ok, out, err) = run_wtp_with_home(&["create", "ws-multi", "--no-hook"], home);
+    assert!(ok, "create failed: {} {}", out, err);
+    let ws_path = home.join(".wtp").join("workspaces").join("ws-multi");
+
+    // First import: directory named after the repo slug, as before.
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &["import", "--repo", repo_str, "-b", "release-area-a-dev"],
+        Some(&ws_path),
+        home,
+    );
+    assert!(ok, "first import failed: {} {}", out, err);
+    assert!(ws_path.join(slug).is_dir());
+
+    // Same repo again without --with-branch-name: clear error with a hint.
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &["import", "--repo", repo_str, "-b", "release-area-b-dev"],
+        Some(&ws_path),
+        home,
+    );
+    assert!(!ok, "unflagged second import should fail");
+    let combined = format!("{} {}", out, err);
+    assert!(
+        combined.contains("--with-branch-name"),
+        "expected --with-branch-name hint, got: {}",
+        combined
+    );
+
+    // Same repo + same branch even with the flag: rejected.
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &[
+            "import",
+            "--repo",
+            repo_str,
+            "-b",
+            "release-area-a-dev",
+            "--with-branch-name",
+        ],
+        Some(&ws_path),
+        home,
+    );
+    assert!(!ok, "duplicate branch import should fail");
+    let combined = format!("{} {}", out, err);
+    assert!(
+        combined.contains("already has a worktree for branch"),
+        "expected duplicate-branch error, got: {}",
+        combined
+    );
+
+    // Same repo, different branch, with the flag: directory is slug@branch.
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &[
+            "import",
+            "--repo",
+            repo_str,
+            "-b",
+            "release-area-b-dev",
+            "--with-branch-name",
+        ],
+        Some(&ws_path),
+        home,
+    );
+    assert!(ok, "flagged import failed: {} {}", out, err);
+    let branch_dir = format!("{}@release-area-b-dev", slug);
+    assert!(ws_path.join(&branch_dir).is_dir());
+
+    // Status lists both worktrees of the same repo.
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["status"], Some(&ws_path), home);
+    assert!(ok, "status failed: {} {}", out, err);
+    assert!(
+        out.contains("release-area-a-dev") && out.contains("release-area-b-dev"),
+        "status should list both branches, got: {}",
+        out
+    );
+
+    // Eject by directory name removes only that worktree.
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["eject", &branch_dir], Some(&ws_path), home);
+    assert!(ok, "eject failed: {} {}", out, err);
+    assert!(!ws_path.join(&branch_dir).exists());
+    assert!(ws_path.join(slug).is_dir());
+
+    // Re-import branch b so the workspace again holds two worktrees of the
+    // same repo, then remove the whole workspace (exercises batch cleanup).
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &[
+            "import",
+            "--repo",
+            repo_str,
+            "-b",
+            "release-area-b-dev",
+            "--with-branch-name",
+        ],
+        Some(&ws_path),
+        home,
+    );
+    assert!(ok, "re-import failed: {} {}", out, err);
+
+    let (ok, out, err) = run_wtp_with_home(&["remove", "ws-multi", "--force"], home);
+    assert!(ok, "rm failed: {} {}", out, err);
+    assert!(!ws_path.exists());
+}
+
+#[test]
+fn test_rm_is_alias_for_remove() {
+    let temp_home = setup_test_env();
+    let home = temp_home.path();
+
+    let (ok, out, err) = run_wtp_with_home(&["create", "ws-rm-alias", "--no-hook"], home);
+    assert!(ok, "create failed: {} {}", out, err);
+    let ws_path = home.join(".wtp").join("workspaces").join("ws-rm-alias");
+    assert!(ws_path.is_dir());
+
+    let (ok, out, err) = run_wtp_with_home(&["rm", "ws-rm-alias", "--force"], home);
+    assert!(ok, "rm alias failed: {} {}", out, err);
+    assert!(!ws_path.exists());
 }

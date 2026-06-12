@@ -189,6 +189,13 @@ impl WorktreeToml {
         self.worktrees.iter().find(|w| w.repo == *repo)
     }
 
+    /// Find a worktree by repo and branch
+    pub fn find_by_repo_and_branch(&self, repo: &RepoRef, branch: &str) -> Option<&WorktreeEntry> {
+        self.worktrees
+            .iter()
+            .find(|w| w.repo == *repo && w.branch == branch)
+    }
+
     /// Whether any worktree's repo matches `pattern` (case-insensitive substring).
     pub fn has_repo_matching(&self, pattern: &str) -> bool {
         // Lower the pattern once here instead of per-worktree inside `matches`.
@@ -198,33 +205,73 @@ impl WorktreeToml {
             .any(|w| w.repo.display().to_lowercase().contains(&pattern))
     }
 
-    /// Find a worktree by repo slug (last component of the path)
-    pub fn find_by_slug(&self, slug: &str) -> Option<&WorktreeEntry> {
-        self.worktrees
+    /// Resolve a worktree by key: the worktree directory name (exact, always
+    /// unique within a workspace), the repo slug, or the repo display name.
+    ///
+    /// Directory name takes precedence. A slug/display key that matches
+    /// multiple worktrees (same repo checked out on several branches) is
+    /// ambiguous and returns an error listing the candidate directory names.
+    pub fn find_by_slug(&self, key: &str) -> crate::Result<Option<&WorktreeEntry>> {
+        if let Some(w) = self
+            .worktrees
             .iter()
-            .find(|w| w.repo.slug() == slug || w.repo.display() == slug)
-    }
-
-    /// Remove a worktree entry by repo slug. Returns true if an entry was removed.
-    /// Errors if multiple worktrees match the slug — use the full display name instead.
-    pub fn remove_by_slug(&mut self, slug: &str) -> crate::Result<bool> {
+            .find(|w| w.worktree_path == std::path::Path::new(key))
+        {
+            return Ok(Some(w));
+        }
         let matches: Vec<_> = self
             .worktrees
             .iter()
-            .filter(|w| w.repo.slug() == slug || w.repo.display() == slug)
+            .filter(|w| w.repo.slug() == key || w.repo.display() == key)
+            .collect();
+        match matches.len() {
+            0 => Ok(None),
+            1 => Ok(Some(matches[0])),
+            _ => Err(Self::ambiguous_key_error(key, &matches)),
+        }
+    }
+
+    /// Remove a worktree entry by key (directory name, repo slug, or display
+    /// name — see [`Self::find_by_slug`]). Returns true if an entry was removed.
+    /// Errors if a slug/display key matches multiple worktrees.
+    pub fn remove_by_slug(&mut self, key: &str) -> crate::Result<bool> {
+        if let Some(pos) = self
+            .worktrees
+            .iter()
+            .position(|w| w.worktree_path == std::path::Path::new(key))
+        {
+            self.worktrees.remove(pos);
+            return Ok(true);
+        }
+        let matches: Vec<_> = self
+            .worktrees
+            .iter()
+            .filter(|w| w.repo.slug() == key || w.repo.display() == key)
             .collect();
         if matches.len() > 1 {
-            let names: Vec<_> = matches.iter().map(|w| w.repo.display()).collect();
-            return Err(crate::error::WtpError::config(format!(
-                "Multiple worktrees match '{}': {}. Use the full name to be specific.",
-                slug,
-                names.join(", ")
-            )));
+            return Err(Self::ambiguous_key_error(key, &matches));
         }
         let before = self.worktrees.len();
         self.worktrees
-            .retain(|w| w.repo.slug() != slug && w.repo.display() != slug);
+            .retain(|w| w.repo.slug() != key && w.repo.display() != key);
         Ok(self.worktrees.len() < before)
+    }
+
+    fn ambiguous_key_error(key: &str, matches: &[&WorktreeEntry]) -> crate::error::WtpError {
+        let names: Vec<_> = matches
+            .iter()
+            .map(|w| format!("{} (branch: {})", w.worktree_path.display(), w.branch))
+            .collect();
+        crate::error::WtpError::config(format!(
+            "Multiple worktrees match '{}': {}. Use the directory name to be specific.",
+            key,
+            names.join(", ")
+        ))
+    }
+
+    /// Remove all worktree entries.
+    pub fn clear(&mut self) {
+        self.worktrees.clear();
     }
 }
 
@@ -269,6 +316,19 @@ impl WorktreeManager {
         PathBuf::from(repo_slug)
     }
 
+    /// Generate a worktree path that encodes the branch name.
+    /// Format: <repo_slug>@<branch>/ where the branch component is sanitized
+    /// like a workspace name (e.g. `feature/x` becomes `feature_x`).
+    ///
+    /// Falls back to the plain slug if the branch sanitizes to nothing.
+    pub fn generate_worktree_path_with_branch(&self, repo_slug: &str, branch: &str) -> PathBuf {
+        let branch_part = crate::config::sanitize_workspace_name(branch);
+        if branch_part.is_empty() {
+            return PathBuf::from(repo_slug);
+        }
+        PathBuf::from(format!("{}@{}", repo_slug, branch_part))
+    }
+
     /// Get all worktrees
     pub fn list_worktrees(&self) -> &[WorktreeEntry] {
         &self.config.worktrees
@@ -281,28 +341,23 @@ impl WorktreeManager {
         Ok(())
     }
 
-    /// Remove a worktree entry by slug and save. Returns true if an entry was removed.
-    pub fn remove_worktree(&mut self, slug: &str) -> crate::Result<bool> {
-        let removed = self.config.remove_by_slug(slug)?;
+    /// Remove a worktree entry by key (directory name, slug, or display name)
+    /// and save. Returns true if an entry was removed.
+    pub fn remove_worktree(&mut self, key: &str) -> crate::Result<bool> {
+        let removed = self.config.remove_by_slug(key)?;
         if removed {
             self.save()?;
         }
         Ok(removed)
     }
 
-    /// Remove multiple worktree entries by slug and save once.
-    /// Returns the number of entries actually removed.
-    pub fn remove_many(&mut self, slugs: &[&str]) -> crate::Result<usize> {
-        let mut removed = 0;
-        for slug in slugs {
-            if self.config.remove_by_slug(slug)? {
-                removed += 1;
-            }
+    /// Remove all worktree entries and save once.
+    pub fn remove_all(&mut self) -> crate::Result<()> {
+        if self.config.worktrees.is_empty() {
+            return Ok(());
         }
-        if removed > 0 {
-            self.save()?;
-        }
-        Ok(removed)
+        self.config.clear();
+        self.save()
     }
 }
 
@@ -387,5 +442,125 @@ mod tests {
     fn has_repo_matching_empty_is_false() {
         let toml = WorktreeToml::new();
         assert!(!toml.has_repo_matching("anything"));
+    }
+
+    fn entry(repo: RepoRef, branch: &str, dir: &str) -> WorktreeEntry {
+        WorktreeEntry::new(repo, branch.to_string(), PathBuf::from(dir), None, None)
+    }
+
+    /// Two branches of the same repo, as created with --with-branch-name.
+    fn multi_branch_toml() -> WorktreeToml {
+        let mut toml = WorktreeToml::new();
+        toml.add_worktree(entry(
+            hosted("gh", "owner/myrepo"),
+            "release-area-a-dev",
+            "myrepo",
+        ));
+        toml.add_worktree(entry(
+            hosted("gh", "owner/myrepo"),
+            "release-area-b-dev",
+            "myrepo@release-area-b-dev",
+        ));
+        toml
+    }
+
+    #[test]
+    fn find_by_repo_and_branch_distinguishes_branches() {
+        let toml = multi_branch_toml();
+        let repo = hosted("gh", "owner/myrepo");
+        let a = toml.find_by_repo_and_branch(&repo, "release-area-a-dev");
+        assert_eq!(a.unwrap().worktree_path, PathBuf::from("myrepo"));
+        let b = toml.find_by_repo_and_branch(&repo, "release-area-b-dev");
+        assert_eq!(
+            b.unwrap().worktree_path,
+            PathBuf::from("myrepo@release-area-b-dev")
+        );
+        assert!(toml.find_by_repo_and_branch(&repo, "main").is_none());
+    }
+
+    #[test]
+    fn find_by_slug_prefers_exact_directory_name() {
+        let toml = multi_branch_toml();
+        let found = toml
+            .find_by_slug("myrepo@release-area-b-dev")
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.branch, "release-area-b-dev");
+    }
+
+    #[test]
+    fn find_by_slug_ambiguous_slug_errors_with_directory_names() {
+        let mut toml = multi_branch_toml();
+        // Rename the first entry's dir so the bare slug matches no directory
+        // and falls through to ambiguous slug matching.
+        toml.worktrees[0].worktree_path = PathBuf::from("myrepo@release-area-a-dev");
+        let err = toml.find_by_slug("myrepo").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("myrepo@release-area-a-dev"), "{}", msg);
+        assert!(msg.contains("myrepo@release-area-b-dev"), "{}", msg);
+    }
+
+    #[test]
+    fn find_by_slug_directory_name_wins_over_ambiguous_slug() {
+        // First entry's dir is the bare slug — exact dir match resolves the
+        // ambiguity instead of erroring.
+        let toml = multi_branch_toml();
+        let found = toml.find_by_slug("myrepo").unwrap().unwrap();
+        assert_eq!(found.branch, "release-area-a-dev");
+    }
+
+    #[test]
+    fn find_by_slug_unique_slug_still_works() {
+        let mut toml = WorktreeToml::new();
+        toml.add_worktree(entry(hosted("gh", "owner/single"), "main", "single"));
+        let found = toml.find_by_slug("single").unwrap().unwrap();
+        assert_eq!(found.branch, "main");
+        assert!(toml.find_by_slug("nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn remove_by_slug_directory_name_removes_only_that_entry() {
+        let mut toml = multi_branch_toml();
+        assert!(toml.remove_by_slug("myrepo@release-area-b-dev").unwrap());
+        assert_eq!(toml.worktrees.len(), 1);
+        assert_eq!(toml.worktrees[0].branch, "release-area-a-dev");
+    }
+
+    #[test]
+    fn remove_by_slug_ambiguous_errors() {
+        let mut toml = multi_branch_toml();
+        toml.worktrees[0].worktree_path = PathBuf::from("myrepo@release-area-a-dev");
+        let err = toml.remove_by_slug("myrepo").unwrap_err();
+        assert!(err.to_string().contains("directory name"));
+        assert_eq!(toml.worktrees.len(), 2);
+    }
+
+    #[test]
+    fn clear_removes_all_entries() {
+        let mut toml = multi_branch_toml();
+        toml.clear();
+        assert!(toml.worktrees.is_empty());
+    }
+
+    #[test]
+    fn generate_worktree_path_with_branch_formats() {
+        let manager = WorktreeManager {
+            config: WorktreeToml::new(),
+            config_path: PathBuf::from("/tmp/worktree.toml"),
+        };
+        assert_eq!(
+            manager.generate_worktree_path_with_branch("myrepo", "release-a-dev"),
+            PathBuf::from("myrepo@release-a-dev")
+        );
+        // Branch names with separators are sanitized.
+        assert_eq!(
+            manager.generate_worktree_path_with_branch("myrepo", "feature/x"),
+            PathBuf::from("myrepo@feature_x")
+        );
+        // Pathological branch names fall back to the plain slug.
+        assert_eq!(
+            manager.generate_worktree_path_with_branch("myrepo", "///"),
+            PathBuf::from("myrepo")
+        );
     }
 }

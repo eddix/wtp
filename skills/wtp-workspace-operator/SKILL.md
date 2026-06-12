@@ -20,6 +20,12 @@ Attached repositories live under:
 
 `<workspace_root>/<workspace_name>/<repo_slug>/`
 
+When the same repository is attached for multiple branches (via
+`--with-branch-name` on `wtp import`/`wtp switch`), the extra worktrees live
+under:
+
+`<workspace_root>/<workspace_name>/<repo_slug>@<branch>/`
+
 `wtp` stores metadata in:
 
 `<workspace_root>/<workspace_name>/.wtp/worktree.toml`

@@ -159,9 +159,7 @@ pub async fn execute(args: RemoveArgs, mut manager: WorkspaceManager) -> anyhow:
 
         // Clear all entries from worktree.toml (batch save)
         let mut worktree_manager = WorktreeManager::load(&workspace_path)?;
-        let slug_strings: Vec<String> = worktrees.iter().map(|e| e.repo.slug()).collect();
-        let slugs: Vec<&str> = slug_strings.iter().map(|s| s.as_str()).collect();
-        worktree_manager.remove_many(&slugs)?;
+        worktree_manager.remove_all()?;
 
         println!();
     }
