@@ -105,6 +105,17 @@ pub struct WorktreeEntry {
     pub head_commit: Option<String>,
     /// Creation timestamp
     pub created_at: DateTime<Local>,
+    /// Parent ref for stacked worktrees. Resolved preferentially as the
+    /// branch of another worktree of the same repo in this workspace
+    /// (forming a chain); otherwise treated as a plain git ref.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    /// Fork point: commit of `parent` recorded at layer creation and
+    /// updated after each successful restack. `wtp restack` rebases with
+    /// `git rebase --onto <parent> <parent_head>` so only commits unique
+    /// to this layer are replayed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_head: Option<String>,
 }
 
 impl WorktreeEntry {
@@ -123,7 +134,16 @@ impl WorktreeEntry {
             base,
             head_commit,
             created_at: Local::now(),
+            parent: None,
+            parent_head: None,
         }
+    }
+
+    /// Attach stacked-worktree parent information to this entry.
+    pub fn with_parent(mut self, parent: String, parent_head: Option<String>) -> Self {
+        self.parent = Some(parent);
+        self.parent_head = parent_head;
+        self
     }
 }
 
@@ -272,6 +292,61 @@ impl WorktreeToml {
     /// Remove all worktree entries.
     pub fn clear(&mut self) {
         self.worktrees.clear();
+    }
+
+    /// Resolve `entry.parent` as another worktree of the same repository in
+    /// this workspace (a stack layer). Returns `None` when the entry has no
+    /// parent or the parent is a plain git ref rather than a layer.
+    pub fn resolve_parent_layer(&self, entry: &WorktreeEntry) -> Option<&WorktreeEntry> {
+        let parent = entry.parent.as_deref()?;
+        self.worktrees
+            .iter()
+            .find(|w| w.repo == entry.repo && w.branch == parent)
+    }
+
+    /// Order worktrees for stacked display and restack: parents come before
+    /// children (DFS), and each entry carries its stack depth. Entries whose
+    /// parent is not a layer in this workspace (including entries with no
+    /// parent at all) are roots at depth 0. Cycles are broken by treating
+    /// already-visited entries as terminals, so this always returns every
+    /// worktree exactly once.
+    pub fn stacked_order(&self) -> Vec<(&WorktreeEntry, usize)> {
+        let mut ordered = Vec::with_capacity(self.worktrees.len());
+        let mut visited = vec![false; self.worktrees.len()];
+
+        // Depth-first from each root, preserving the original file order for
+        // roots and for the children of any given parent.
+        fn visit<'a>(
+            toml: &'a WorktreeToml,
+            idx: usize,
+            depth: usize,
+            visited: &mut Vec<bool>,
+            ordered: &mut Vec<(&'a WorktreeEntry, usize)>,
+        ) {
+            if visited[idx] {
+                return;
+            }
+            visited[idx] = true;
+            let entry = &toml.worktrees[idx];
+            ordered.push((entry, depth));
+            for (child_idx, child) in toml.worktrees.iter().enumerate() {
+                if child.repo == entry.repo && child.parent.as_deref() == Some(&entry.branch) {
+                    visit(toml, child_idx, depth + 1, visited, ordered);
+                }
+            }
+        }
+
+        for (idx, entry) in self.worktrees.iter().enumerate() {
+            if self.resolve_parent_layer(entry).is_none() {
+                visit(self, idx, 0, &mut visited, &mut ordered);
+            }
+        }
+        // Anything still unvisited is part of a parent cycle; emit each as a
+        // root so nothing is silently dropped.
+        for idx in 0..self.worktrees.len() {
+            visit(self, idx, 0, &mut visited, &mut ordered);
+        }
+        ordered
     }
 }
 
@@ -540,6 +615,102 @@ mod tests {
         let mut toml = multi_branch_toml();
         toml.clear();
         assert!(toml.worktrees.is_empty());
+    }
+
+    fn stacked_entry(repo: RepoRef, branch: &str, dir: &str, parent: &str) -> WorktreeEntry {
+        entry(repo, branch, dir).with_parent(parent.to_string(), Some("abc123".to_string()))
+    }
+
+    /// A stack feat-1 <- feat-2 <- feat-3 plus an unrelated flat worktree.
+    fn stacked_toml() -> WorktreeToml {
+        let mut toml = WorktreeToml::new();
+        toml.add_worktree(entry(hosted("gh", "owner/other"), "main", "other"));
+        toml.add_worktree(entry(hosted("gh", "owner/myrepo"), "feat-1", "myrepo"));
+        toml.add_worktree(stacked_entry(
+            hosted("gh", "owner/myrepo"),
+            "feat-3",
+            "myrepo@feat-3",
+            "feat-2",
+        ));
+        toml.add_worktree(stacked_entry(
+            hosted("gh", "owner/myrepo"),
+            "feat-2",
+            "myrepo@feat-2",
+            "feat-1",
+        ));
+        toml
+    }
+
+    #[test]
+    fn with_parent_sets_fields() {
+        let e = stacked_entry(hosted("gh", "o/r"), "b", "r@b", "p");
+        assert_eq!(e.parent.as_deref(), Some("p"));
+        assert_eq!(e.parent_head.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn parent_fields_roundtrip_and_stay_optional() {
+        let mut toml = WorktreeToml::new();
+        toml.add_worktree(entry(hosted("gh", "o/flat"), "main", "flat"));
+        toml.add_worktree(stacked_entry(hosted("gh", "o/r"), "b", "r@b", "p"));
+        let text = toml::to_string_pretty(&toml).unwrap();
+        // Flat entries must not gain parent keys in the file.
+        assert_eq!(text.matches("parent =").count(), 1, "{}", text);
+        let parsed: WorktreeToml = toml::from_str(&text).unwrap();
+        assert_eq!(parsed.worktrees[0].parent, None);
+        assert_eq!(parsed.worktrees[1].parent.as_deref(), Some("p"));
+        assert_eq!(parsed.worktrees[1].parent_head.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn resolve_parent_layer_matches_same_repo_branch() {
+        let toml = stacked_toml();
+        let feat2 = toml.find_by_slug("myrepo@feat-2").unwrap().unwrap().clone();
+        let parent = toml.resolve_parent_layer(&feat2).unwrap();
+        assert_eq!(parent.branch, "feat-1");
+    }
+
+    #[test]
+    fn resolve_parent_layer_ignores_other_repos_and_plain_refs() {
+        let mut toml = stacked_toml();
+        // Same branch name exists in another repo — must not match.
+        toml.add_worktree(stacked_entry(
+            hosted("gh", "owner/unrelated"),
+            "x",
+            "unrelated@x",
+            "feat-1",
+        ));
+        let x = toml.find_by_slug("unrelated@x").unwrap().unwrap().clone();
+        assert!(toml.resolve_parent_layer(&x).is_none());
+        // Plain-ref parent (e.g. origin/main) is not a layer either.
+        let flat = entry(hosted("gh", "owner/myrepo"), "solo", "myrepo@solo")
+            .with_parent("origin/main".to_string(), None);
+        assert!(toml.resolve_parent_layer(&flat).is_none());
+    }
+
+    #[test]
+    fn stacked_order_is_dfs_with_depths() {
+        let toml = stacked_toml();
+        let order: Vec<(&str, usize)> = toml
+            .stacked_order()
+            .into_iter()
+            .map(|(e, d)| (e.branch.as_str(), d))
+            .collect();
+        assert_eq!(
+            order,
+            vec![("main", 0), ("feat-1", 0), ("feat-2", 1), ("feat-3", 2),]
+        );
+    }
+
+    #[test]
+    fn stacked_order_breaks_cycles_without_dropping_entries() {
+        let mut toml = WorktreeToml::new();
+        toml.add_worktree(stacked_entry(hosted("gh", "o/r"), "a", "r@a", "b"));
+        toml.add_worktree(stacked_entry(hosted("gh", "o/r"), "b", "r@b", "a"));
+        let order = toml.stacked_order();
+        assert_eq!(order.len(), 2);
+        let branches: Vec<&str> = order.iter().map(|(e, _)| e.branch.as_str()).collect();
+        assert!(branches.contains(&"a") && branches.contains(&"b"));
     }
 
     #[test]

@@ -737,6 +737,165 @@ fn test_import_same_repo_multiple_branches() {
 }
 
 #[test]
+fn test_import_parent_creates_stacked_layer() {
+    let temp_home = setup_test_env();
+    let home = temp_home.path();
+
+    let repo_dir = TempDir::new().unwrap();
+    let repo_path = repo_dir.path();
+    init_git_repo(repo_path);
+    let repo_str = repo_path.to_str().unwrap();
+    let slug = repo_path.file_name().unwrap().to_str().unwrap();
+
+    let (ok, out, err) = run_wtp_with_home(&["create", "ws-stack", "--no-hook"], home);
+    assert!(ok, "create failed: {} {}", out, err);
+    let ws_path = home.join(".wtp").join("workspaces").join("ws-stack");
+
+    // Bottom layer: a plain import, no parent.
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &["import", "--repo", repo_str, "-b", "feat-1"],
+        Some(&ws_path),
+        home,
+    );
+    assert!(ok, "bottom import failed: {} {}", out, err);
+    let feat1_dir = ws_path.join(slug);
+    assert!(feat1_dir.is_dir());
+
+    // --parent conflicts with --base at the CLI level.
+    let (ok, _, err) = run_wtp_in_dir_with_home(
+        &[
+            "import", "--repo", repo_str, "-b", "feat-2", "--parent", "feat-1", "-B", "main",
+        ],
+        Some(&ws_path),
+        home,
+    );
+    assert!(!ok, "--parent with --base should be rejected");
+    assert!(
+        err.contains("cannot be used with"),
+        "expected clap conflict error, got: {}",
+        err
+    );
+
+    // --parent with an unknown ref fails before creating anything.
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &[
+            "import",
+            "--repo",
+            repo_str,
+            "-b",
+            "feat-2",
+            "--parent",
+            "no-such-ref",
+        ],
+        Some(&ws_path),
+        home,
+    );
+    assert!(!ok, "unknown parent ref should fail");
+    let combined = format!("{} {}", out, err);
+    assert!(
+        combined.contains("not found"),
+        "expected parent-not-found error, got: {}",
+        combined
+    );
+
+    // Stack a layer from inside the parent's worktree directory: PATH is
+    // omitted and the repo is inferred; --with-branch-name is implied.
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &["import", "-b", "feat-2", "--parent", "feat-1"],
+        Some(&feat1_dir),
+        home,
+    );
+    assert!(ok, "stacked import failed: {} {}", out, err);
+    assert!(out.contains("Stacked on parent"), "got: {}", out);
+    let feat2_dir = ws_path.join(format!("{}@feat-2", slug));
+    assert!(feat2_dir.is_dir(), "implied --with-branch-name directory");
+
+    // The stack edge and fork point are recorded in worktree.toml.
+    let toml_text = std::fs::read_to_string(ws_path.join(".wtp").join("worktree.toml")).unwrap();
+    assert!(
+        toml_text.contains("parent = \"feat-1\""),
+        "worktree.toml missing parent: {}",
+        toml_text
+    );
+    assert!(
+        toml_text.contains("parent_head = \""),
+        "worktree.toml missing parent_head: {}",
+        toml_text
+    );
+
+    // --parent without PATH from the workspace root (not a worktree dir)
+    // errors instead of falling through to the interactive picker.
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &["import", "-b", "feat-3", "--parent", "feat-2"],
+        Some(&ws_path),
+        home,
+    );
+    assert!(!ok, "--parent without PATH at workspace root should fail");
+    let combined = format!("{} {}", out, err);
+    assert!(
+        combined.contains("worktree directory"),
+        "expected inference error, got: {}",
+        combined
+    );
+
+    // Add a commit on feat-2 so the divergence marker has something to show.
+    let run_git = |dir: &std::path::Path, args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    std::fs::write(feat2_dir.join("layer2.txt"), "l2").unwrap();
+    run_git(&feat2_dir, &["add", "."]);
+    run_git(&feat2_dir, &["commit", "-m", "layer 2 work"]);
+
+    // Compact status shows the tree marker and the ahead count.
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["status"], Some(&ws_path), home);
+    assert!(ok, "status failed: {} {}", out, err);
+    assert!(
+        out.contains("└ feat-2") || out.contains("└"),
+        "expected tree marker in status, got: {}",
+        out
+    );
+    assert!(
+        out.contains("↑1"),
+        "expected ahead marker for feat-2, got: {}",
+        out
+    );
+
+    // Long status shows the Parent line.
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["status", "--long"], Some(&ws_path), home);
+    assert!(ok, "status --long failed: {} {}", out, err);
+    assert!(
+        out.contains("Parent:") && out.contains("+1 ahead"),
+        "expected parent divergence in long status, got: {}",
+        out
+    );
+
+    // Deleting the parent branch surfaces "parent missing". The branch is
+    // checked out in feat1_dir's worktree, so drop that worktree first.
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["eject", slug], Some(&ws_path), home);
+    assert!(ok, "eject failed: {} {}", out, err);
+    run_git(repo_path, &["branch", "-D", "feat-1"]);
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["status"], Some(&ws_path), home);
+    assert!(ok, "status after branch delete failed: {} {}", out, err);
+    assert!(
+        out.contains("parent missing"),
+        "expected parent-missing marker, got: {}",
+        out
+    );
+
+    let _ = run_wtp_with_home(&["remove", "ws-stack", "--force"], home);
+}
+
+#[test]
 fn test_rm_is_alias_for_remove() {
     let temp_home = setup_test_env();
     let home = temp_home.path();

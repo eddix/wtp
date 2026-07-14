@@ -392,6 +392,48 @@ impl GitClient {
         }
     }
 
+    /// Resolve a ref to a commit hash. Returns `Ok(None)` if the ref does
+    /// not exist in the repository.
+    pub fn rev_parse(&self, repo_path: &Path, git_ref: &str) -> Result<Option<String>> {
+        validate_git_ref(git_ref, "reference")?;
+
+        let output = Command::new("git")
+            .current_dir(repo_path)
+            .arg("rev-parse")
+            .arg("--verify")
+            .arg("--quiet")
+            .arg(format!("{}^{{commit}}", git_ref))
+            .output()?;
+
+        if !output.status.success() {
+            return Ok(None);
+        }
+        Ok(Some(
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        ))
+    }
+
+    /// Find the merge base of two refs. Returns `Ok(None)` if either ref is
+    /// missing or the refs share no common ancestor.
+    pub fn merge_base(&self, repo_path: &Path, a: &str, b: &str) -> Result<Option<String>> {
+        validate_git_ref(a, "reference")?;
+        validate_git_ref(b, "reference")?;
+
+        let output = Command::new("git")
+            .current_dir(repo_path)
+            .arg("merge-base")
+            .arg(a)
+            .arg(b)
+            .output()?;
+
+        if !output.status.success() {
+            return Ok(None);
+        }
+        Ok(Some(
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        ))
+    }
+
     /// Get combined status and stash information for a repository.
     pub fn get_full_status(&self, repo_path: &Path) -> Result<FullGitStatus> {
         let output = Command::new("git")

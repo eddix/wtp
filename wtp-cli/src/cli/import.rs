@@ -37,6 +37,13 @@ pub struct ImportArgs {
     /// the same repository can coexist in one workspace
     #[arg(long)]
     with_branch_name: bool,
+
+    /// Stack the new worktree on top of PARENT (a branch of another worktree
+    /// in this workspace, or any git ref). The new branch starts at PARENT.
+    /// Implies --with-branch-name. When run inside a worktree directory,
+    /// PATH may be omitted and the repository is inferred from it.
+    #[arg(short = 'p', long, value_name = "PARENT", conflicts_with = "base")]
+    parent: Option<String>,
 }
 
 pub async fn execute(args: ImportArgs, manager: WorkspaceManager) -> anyhow::Result<()> {
@@ -55,6 +62,9 @@ pub async fn execute(args: ImportArgs, manager: WorkspaceManager) -> anyhow::Res
     let fence = Fence::from_config(manager.global_config());
     common::check_workspace_boundary(&fence, &workspace_name, &workspace_path)?;
 
+    // Load existing worktrees (also used to infer the repo for --parent)
+    let worktree_manager = WorktreeManager::load(&workspace_path)?;
+
     // Resolve repository reference
     let repo_ref = if let Some(repo) = args.repo {
         // --repo flag provided
@@ -67,6 +77,18 @@ pub async fn execute(args: ImportArgs, manager: WorkspaceManager) -> anyhow::Res
     } else if let Some(path) = args.path {
         // Positional path argument provided
         resolve_repo_ref(&manager, &path, args.host.as_deref())?
+    } else if args.parent.is_some() {
+        // --parent without PATH: infer the repo from the worktree directory
+        // the command is running in (the typical "stack a new layer on top
+        // of the one I'm standing in" flow). Never falls through to the
+        // interactive picker — stacking on a fuzzy-picked repo is too easy
+        // to get wrong.
+        detect_current_worktree_repo(&workspace_path, &worktree_manager)?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "--parent without PATH only works inside a worktree directory of this workspace.\n\
+                 Run it from the parent layer's directory, or pass the repository explicitly."
+            )
+        })?
     } else {
         // No path or repo specified — interactive selection
         resolve_repo_interactively(&manager, args.host.as_deref())?
@@ -97,29 +119,47 @@ pub async fn execute(args: ImportArgs, manager: WorkspaceManager) -> anyhow::Res
     // Determine branch name
     let branch = args.branch.unwrap_or_else(|| workspace_name.clone());
 
-    // Determine base reference
-    let base = args
-        .base
-        .unwrap_or_else(|| match git.get_current_branch(&repo_root) {
-            Ok(branch) => branch,
-            Err(e) => {
-                tracing::warn!(
-                    "Could not detect current branch for {}: {}",
-                    repo_root.display(),
-                    e
-                );
-                eprintln!(
-                    "{} Could not detect current branch ({}), using HEAD as base.",
-                    "Warning:".yellow().bold(),
-                    e
-                );
-                "HEAD".to_string()
-            }
-        });
+    // Validate the parent ref before touching anything
+    if let Some(parent) = &args.parent {
+        if *parent == branch {
+            anyhow::bail!("--parent '{}' cannot equal the new branch name", parent);
+        }
+        if git.rev_parse(&repo_root, parent)?.is_none() {
+            anyhow::bail!(
+                "Parent ref '{}' not found in repository {}",
+                parent.yellow(),
+                repo_root.display()
+            );
+        }
+    }
 
-    // Load existing worktrees
-    let worktree_manager = WorktreeManager::load(&workspace_path)?;
-    let (_worktree_path_abs, entry) = common::create_worktree_in_workspace(
+    // Determine base reference: a stacked layer starts at its parent
+    let base = if let Some(parent) = &args.parent {
+        parent.clone()
+    } else {
+        args.base
+            .unwrap_or_else(|| match git.get_current_branch(&repo_root) {
+                Ok(branch) => branch,
+                Err(e) => {
+                    tracing::warn!(
+                        "Could not detect current branch for {}: {}",
+                        repo_root.display(),
+                        e
+                    );
+                    eprintln!(
+                        "{} Could not detect current branch ({}), using HEAD as base.",
+                        "Warning:".yellow().bold(),
+                        e
+                    );
+                    "HEAD".to_string()
+                }
+            })
+    };
+
+    // --parent implies --with-branch-name so stack layers can coexist
+    let with_branch_name = args.with_branch_name || args.parent.is_some();
+
+    let (worktree_path_abs, entry) = common::create_worktree_in_workspace(
         &git,
         &repo_root,
         &workspace_path,
@@ -127,8 +167,37 @@ pub async fn execute(args: ImportArgs, manager: WorkspaceManager) -> anyhow::Res
         &branch,
         &base,
         &worktree_manager,
-        args.with_branch_name,
+        with_branch_name,
     )?;
+
+    // Record the stack edge and its fork point. merge-base covers both the
+    // new-branch case (equals the parent commit) and the existing-branch
+    // case (the actual divergence point).
+    let entry = if let Some(parent) = &args.parent {
+        let fork_point = git.merge_base(&worktree_path_abs, &branch, parent)?;
+        if fork_point.is_none() {
+            eprintln!(
+                "{} Branch '{}' shares no history with parent '{}'; \
+                 restack will need a manual fork point.",
+                "Warning:".yellow().bold(),
+                branch,
+                parent
+            );
+        }
+        println!(
+            "Stacked on parent: {}{}",
+            parent.cyan(),
+            fork_point
+                .as_deref()
+                .map(|c| format!(" (fork point {})", &c[..c.len().min(7)])
+                    .dimmed()
+                    .to_string())
+                .unwrap_or_default()
+        );
+        entry.with_parent(parent.clone(), fork_point)
+    } else {
+        entry
+    };
 
     // Record in worktree.toml
     let mut worktree_manager = WorktreeManager::load(&workspace_path)?;
@@ -137,6 +206,28 @@ pub async fn execute(args: ImportArgs, manager: WorkspaceManager) -> anyhow::Res
     println!("{} Worktree imported successfully!", "✓".green().bold());
 
     Ok(())
+}
+
+/// When run inside a worktree directory of the current workspace, return
+/// that worktree's repository reference.
+fn detect_current_worktree_repo(
+    workspace_path: &std::path::Path,
+    worktree_manager: &WorktreeManager,
+) -> anyhow::Result<Option<RepoRef>> {
+    let cwd = std::env::current_dir()?;
+    let Ok(rel) = cwd.strip_prefix(workspace_path) else {
+        return Ok(None);
+    };
+    let Some(first) = rel.components().next() else {
+        return Ok(None);
+    };
+    let dir = std::path::Path::new(first.as_os_str());
+    Ok(worktree_manager
+        .config()
+        .worktrees
+        .iter()
+        .find(|w| w.worktree_path == dir)
+        .map(|w| w.repo.clone()))
 }
 
 /// Resolve repository interactively when no path is provided.
