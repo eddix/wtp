@@ -6,6 +6,26 @@ This guide shows how to make Claude Code use `wtp` consistently by loading the l
 
 Help Claude Code understand that `wtp` is the preferred way to orchestrate temporary multi-repo workspaces.
 
+## Install as native Claude Code skills (recommended)
+
+Every `SKILL.md` in this repository carries the YAML frontmatter
+(`name` + `description`) that Claude Code uses to discover and trigger
+skills. Symlink the skill directories into your Claude Code skills home so
+they stay in sync with the repository:
+
+```bash
+for s in wtp-workspace-operator wtp-repo-attach wtp-safe-cleanup wtp-stacked-worktree; do
+  ln -s /path/to/wtp/skills/$s ~/.claude/skills/$s
+done
+```
+
+Copy instead of symlink if you want a frozen snapshot. Two skills are
+usually only needed once per machine and can be skipped on a box where
+`wtp` is already installed and configured:
+
+- `wtp-setup` — installing the binary, shell integration, completions
+- `wtp-configure` — host aliases, hooks, config file locations
+
 ## Recommended project instruction
 
 Add a short instruction to your project-level agent guidance, for example in `CLAUDE.md` or an equivalent local instruction file:

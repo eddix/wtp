@@ -1,3 +1,8 @@
+---
+name: wtp-configure
+description: Inspect or change wtp configuration - host aliases (wtp host), default host, workspace root, on_create hooks, config file precedence. Use when configuring wtp or resolving multiple-config-file warnings.
+---
+
 # Skill: wtp-configure
 
 Use this skill when an agent needs to inspect or change `wtp` configuration: host aliases, the default host, the workspace root, workspace-creation hooks, or display options.

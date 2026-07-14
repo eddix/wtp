@@ -1,3 +1,8 @@
+---
+name: wtp-setup
+description: Install, upgrade, or verify the wtp binary and set up shell integration (wtp shell-init) and completions. Use when installing wtp, diagnosing a stale binary after an upgrade, or configuring a user's shell for wtp cd.
+---
+
 # Skill: wtp-setup
 
 Use this skill when an agent needs to install, upgrade, or verify the `wtp` binary, or set up shell integration and completions for a human user.
