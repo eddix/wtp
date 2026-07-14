@@ -1,3 +1,8 @@
+---
+name: wtp-workspace-operator
+description: Create, inspect, reuse, and remove wtp workspaces (multi-repo git worktree containers). Use when starting a task that needs a temporary multi-repo workspace, checking whether a workspace exists or what repos it holds, or removing a workspace after the work is done.
+---
+
 # Skill: wtp-workspace-operator
 
 Use this skill when an agent needs to create, inspect, reuse, navigate, or remove a `wtp` workspace while working across one or more repositories.

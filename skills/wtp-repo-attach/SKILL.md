@@ -1,3 +1,8 @@
+---
+name: wtp-repo-attach
+description: Attach repositories to a wtp workspace - decide between wtp switch (current repo) and wtp import (another repo), handle host aliases, branch/base selection, and multiple branches of one repository. Use before running wtp switch or wtp import.
+---
+
 # Skill: wtp-repo-attach
 
 Use this skill when an agent needs to attach a repository to a `wtp` workspace.

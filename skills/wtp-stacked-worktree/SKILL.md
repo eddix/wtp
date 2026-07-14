@@ -1,3 +1,8 @@
+---
+name: wtp-stacked-worktree
+description: Stacked-PR style vertical development with wtp - create stack layers (wtp import --parent), read stack trees in wtp status, cascade-rebase with wtp restack, resolve restack conflicts and resume, retarget layers after a bottom branch merges. Use when working with stacked branches in one repository.
+---
+
 # Skill: wtp-stacked-worktree
 
 Use this skill when an agent works with stacked branches (stacked-PR style

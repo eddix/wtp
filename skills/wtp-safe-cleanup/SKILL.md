@@ -1,3 +1,8 @@
+---
+name: wtp-safe-cleanup
+description: Safely eject worktrees from a wtp workspace or remove whole workspaces - dirty-state checks, --force policy, ambiguous worktree name resolution. Use before wtp eject, wtp rm, or any destructive wtp cleanup.
+---
+
 # Skill: wtp-safe-cleanup
 
 Use this skill when an agent needs to clean up a `wtp` workspace or detach repositories from it without surprising the user.
