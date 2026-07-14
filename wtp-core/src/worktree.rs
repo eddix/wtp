@@ -336,6 +336,44 @@ impl WorktreeToml {
         true
     }
 
+    /// All worktrees in the stack chain containing `entry`: the chain's root
+    /// plus every descendant, in parents-first order. For an entry with no
+    /// layer parent and no children this is just the entry itself.
+    pub fn chain_of(&self, entry: &WorktreeEntry) -> Vec<&WorktreeEntry> {
+        // Walk up to the chain root (bounded — parent cycles terminate).
+        let mut root = match self.find_by_path(&entry.worktree_path) {
+            Some(e) => e,
+            None => return Vec::new(),
+        };
+        for _ in 0..=self.worktrees.len() {
+            match self.resolve_parent_layer(root) {
+                Some(p) => root = p,
+                None => break,
+            }
+        }
+        let root_path = root.worktree_path.clone();
+        self.stacked_order()
+            .into_iter()
+            .filter(|(e, _)| self.chain_root_of(e).worktree_path == root_path)
+            .map(|(e, _)| e)
+            .collect()
+    }
+
+    fn find_by_path(&self, path: &std::path::Path) -> Option<&WorktreeEntry> {
+        self.worktrees.iter().find(|w| w.worktree_path == path)
+    }
+
+    fn chain_root_of<'a>(&'a self, entry: &'a WorktreeEntry) -> &'a WorktreeEntry {
+        let mut current = entry;
+        for _ in 0..=self.worktrees.len() {
+            match self.resolve_parent_layer(current) {
+                Some(p) => current = p,
+                None => break,
+            }
+        }
+        current
+    }
+
     /// Order worktrees for stacked display and restack: parents come before
     /// children (DFS), and each entry carries its stack depth. Entries whose
     /// parent is not a layer in this workspace (including entries with no
@@ -496,6 +534,28 @@ impl WorktreeManager {
         if parent_head.is_some() {
             entry.parent_head = parent_head;
         }
+        self.save()?;
+        Ok(true)
+    }
+
+    /// Update only the fork point of the worktree identified by `key` and
+    /// save. Used by restack after a layer lands on its parent.
+    /// Returns false if no worktree matches `key`.
+    pub fn set_parent_head(&mut self, key: &str, parent_head: String) -> crate::Result<bool> {
+        let Some(path) = self
+            .config
+            .find_by_slug(key)?
+            .map(|w| w.worktree_path.clone())
+        else {
+            return Ok(false);
+        };
+        let entry = self
+            .config
+            .worktrees
+            .iter_mut()
+            .find(|w| w.worktree_path == path)
+            .expect("entry vanished between lookup and update");
+        entry.parent_head = Some(parent_head);
         self.save()?;
         Ok(true)
     }
@@ -817,6 +877,32 @@ mod tests {
         let other = entry(hosted("gh", "o/r"), "c", "r@c");
         // Attaching to a chain that already cycles must be refused, not hang.
         assert!(toml.would_create_cycle(&other, "a"));
+    }
+
+    #[test]
+    fn chain_of_returns_whole_chain_from_any_member() {
+        let toml = stacked_toml();
+        for key in ["myrepo", "myrepo@feat-2", "myrepo@feat-3"] {
+            let member = toml.find_by_slug(key).unwrap().unwrap().clone();
+            let chain: Vec<&str> = toml
+                .chain_of(&member)
+                .into_iter()
+                .map(|e| e.branch.as_str())
+                .collect();
+            assert_eq!(chain, vec!["feat-1", "feat-2", "feat-3"], "from {}", key);
+        }
+    }
+
+    #[test]
+    fn chain_of_flat_worktree_is_itself() {
+        let toml = stacked_toml();
+        let flat = toml.find_by_slug("other").unwrap().unwrap().clone();
+        let chain: Vec<&str> = toml
+            .chain_of(&flat)
+            .into_iter()
+            .map(|e| e.branch.as_str())
+            .collect();
+        assert_eq!(chain, vec!["main"]);
     }
 
     #[test]

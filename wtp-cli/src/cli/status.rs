@@ -193,28 +193,27 @@ async fn print_detailed_status(
         // Base branch divergence (skipped for stack layers: base == parent)
         if wt.parent.is_none()
             && let Some(base) = &wt.base
+            && base != "HEAD"
         {
-            if base != "HEAD" {
-                let base_info = match git.get_ahead_behind(&wt_full_path, base) {
-                    Ok(Some((ahead, behind))) => {
-                        if ahead > 0 || behind > 0 {
-                            let mut parts = Vec::new();
-                            if ahead > 0 {
-                                parts.push(format!("{}", format!("+{} ahead", ahead).green()));
-                            }
-                            if behind > 0 {
-                                parts.push(format!("{}", format!("-{} behind", behind).red()));
-                            }
-                            format!("{} ({})", base.cyan(), parts.join(", "))
-                        } else {
-                            format!("{} {}", base.cyan(), "up to date".green())
+            let base_info = match git.get_ahead_behind(&wt_full_path, base) {
+                Ok(Some((ahead, behind))) => {
+                    if ahead > 0 || behind > 0 {
+                        let mut parts = Vec::new();
+                        if ahead > 0 {
+                            parts.push(format!("{}", format!("+{} ahead", ahead).green()));
                         }
+                        if behind > 0 {
+                            parts.push(format!("{}", format!("-{} behind", behind).red()));
+                        }
+                        format!("{} ({})", base.cyan(), parts.join(", "))
+                    } else {
+                        format!("{} {}", base.cyan(), "up to date".green())
                     }
-                    Ok(None) => format!("{} {}", base.cyan(), "up to date".green()),
-                    Err(_) => format!("{} {}", base.cyan(), "unknown".dimmed()),
-                };
-                println!("  {:<10} {}", "Base:".bold(), base_info);
-            }
+                }
+                Ok(None) => format!("{} {}", base.cyan(), "up to date".green()),
+                Err(_) => format!("{} {}", base.cyan(), "unknown".dimmed()),
+            };
+            println!("  {:<10} {}", "Base:".bold(), base_info);
         }
 
         // HEAD: hash + subject + relative time

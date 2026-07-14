@@ -13,6 +13,7 @@ pub mod import;
 pub mod ls;
 pub mod remove;
 pub mod repo_color;
+pub mod restack;
 pub mod retarget;
 pub mod shell_init;
 pub mod status;
@@ -338,6 +339,10 @@ pub enum Commands {
     /// Import a repository's worktree into a workspace
     #[cmd_group("Repository Operations")]
     Import(import::ImportArgs),
+    /// Rebase stack layers onto their parents (current chain, or all
+    /// chains when run from the workspace root)
+    #[cmd_group("Repository Operations")]
+    Restack(restack::RestackArgs),
     /// Change the stack parent of a worktree (metadata only)
     #[cmd_group("Repository Operations")]
     Retarget(retarget::RetargetArgs),
@@ -420,6 +425,9 @@ pub async fn run() -> anyhow::Result<()> {
         }
         Commands::Import(args) => {
             import::execute(args, wtp_core::WorkspaceManager::new(loaded_config)).await?
+        }
+        Commands::Restack(args) => {
+            restack::execute(args, wtp_core::WorkspaceManager::new(loaded_config)).await?
         }
         Commands::Retarget(args) => {
             retarget::execute(args, wtp_core::WorkspaceManager::new(loaded_config)).await?

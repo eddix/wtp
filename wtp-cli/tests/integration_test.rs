@@ -1010,6 +1010,277 @@ fn test_retarget_and_eject_hint() {
     let _ = run_wtp_with_home(&["remove", "ws-rt", "--force"], home);
 }
 
+fn run_git(dir: &std::path::Path, args: &[&str]) {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn git_log_subjects(dir: &std::path::Path) -> String {
+    let out = Command::new("git")
+        .args(["log", "--format=%s"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+/// Build ws with feat-1 <- feat-2 <- feat-3 and one commit on each layer.
+/// Returns (ws_path, slug).
+fn setup_three_layer_stack(
+    home: &std::path::Path,
+    repo_path: &std::path::Path,
+    ws_name: &str,
+) -> (PathBuf, String) {
+    init_git_repo(repo_path);
+    let repo_str = repo_path.to_str().unwrap();
+    let slug = repo_path.file_name().unwrap().to_str().unwrap().to_string();
+
+    let (ok, out, err) = run_wtp_with_home(&["create", ws_name, "--no-hook"], home);
+    assert!(ok, "create failed: {} {}", out, err);
+    let ws_path = home.join(".wtp").join("workspaces").join(ws_name);
+
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &["import", "--repo", repo_str, "-b", "feat-1"],
+        Some(&ws_path),
+        home,
+    );
+    assert!(ok, "feat-1 import failed: {} {}", out, err);
+    let feat1_dir = ws_path.join(&slug);
+
+    for (branch, parent, file) in [("feat-2", "feat-1", "two"), ("feat-3", "feat-2", "three")] {
+        let parent_dir = if parent == "feat-1" {
+            feat1_dir.clone()
+        } else {
+            ws_path.join(format!("{}@{}", slug, parent))
+        };
+        let (ok, out, err) = run_wtp_in_dir_with_home(
+            &["import", "-b", branch, "--parent", parent],
+            Some(&parent_dir),
+            home,
+        );
+        assert!(ok, "{} import failed: {} {}", branch, out, err);
+        let layer_dir = ws_path.join(format!("{}@{}", slug, branch));
+        std::fs::write(layer_dir.join(format!("{}.txt", file)), file).unwrap();
+        run_git(&layer_dir, &["add", "."]);
+        run_git(&layer_dir, &["commit", "-m", &format!("{} work", branch)]);
+    }
+
+    (ws_path, slug)
+}
+
+#[test]
+fn test_restack_cascade_and_idempotent() {
+    let temp_home = setup_test_env();
+    let home = temp_home.path();
+    let repo_dir = TempDir::new().unwrap();
+    let (ws_path, slug) = setup_three_layer_stack(home, repo_dir.path(), "ws-cascade");
+    let feat1_dir = ws_path.join(&slug);
+    let feat3_dir = ws_path.join(format!("{}@feat-3", slug));
+
+    // Advance feat-1 so both children fall behind.
+    std::fs::write(feat1_dir.join("base.txt"), "base work").unwrap();
+    run_git(&feat1_dir, &["add", "."]);
+    run_git(&feat1_dir, &["commit", "-m", "feat-1 advance"]);
+
+    // Restack everything from the workspace root.
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["restack"], Some(&ws_path), home);
+    assert!(ok, "restack failed: {} {}", out, err);
+    assert!(
+        out.contains("2 rebased"),
+        "expected two layers rebased, got: {}",
+        out
+    );
+    assert!(
+        out.contains("--force-with-lease") && out.contains("feat-2") && out.contains("feat-3"),
+        "expected force-push checklist, got: {}",
+        out
+    );
+
+    // The advance commit propagated to the top of the stack.
+    let log = git_log_subjects(&feat3_dir);
+    assert!(
+        log.contains("feat-1 advance")
+            && log.contains("feat-2 work")
+            && log.contains("feat-3 work"),
+        "feat-3 history after restack: {}",
+        log
+    );
+
+    // Idempotent: a second run skips every layer.
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["restack"], Some(&ws_path), home);
+    assert!(ok, "second restack failed: {} {}", out, err);
+    assert!(
+        out.contains("0 rebased") && out.contains("2 already up to date"),
+        "expected all-skip on second run, got: {}",
+        out
+    );
+
+    // Scoped run from inside a layer directory also succeeds (same chain).
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["restack"], Some(&feat3_dir), home);
+    assert!(ok, "scoped restack failed: {} {}", out, err);
+
+    let _ = run_wtp_with_home(&["remove", "ws-cascade", "--force"], home);
+}
+
+#[test]
+fn test_restack_dirty_preflight_blocks() {
+    let temp_home = setup_test_env();
+    let home = temp_home.path();
+    let repo_dir = TempDir::new().unwrap();
+    let (ws_path, slug) = setup_three_layer_stack(home, repo_dir.path(), "ws-dirty");
+    let feat2_dir = ws_path.join(format!("{}@feat-2", slug));
+
+    std::fs::write(feat2_dir.join("wip.txt"), "uncommitted").unwrap();
+
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["restack"], Some(&ws_path), home);
+    assert!(!ok, "restack should refuse dirty layers");
+    let combined = format!("{} {}", out, err);
+    assert!(
+        combined.contains("uncommitted changes") && combined.contains("feat-2"),
+        "expected dirty preflight error, got: {}",
+        combined
+    );
+
+    let _ = run_wtp_with_home(&["remove", "ws-dirty", "--force"], home);
+}
+
+#[test]
+fn test_restack_conflict_stops_then_resumes() {
+    let temp_home = setup_test_env();
+    let home = temp_home.path();
+    let repo_dir = TempDir::new().unwrap();
+    let (ws_path, slug) = setup_three_layer_stack(home, repo_dir.path(), "ws-conflict");
+    let feat1_dir = ws_path.join(&slug);
+    let feat2_dir = ws_path.join(format!("{}@feat-2", slug));
+
+    // feat-1 rewrites the same file feat-2 created -> guaranteed conflict.
+    std::fs::write(feat1_dir.join("two.txt"), "conflicting base content").unwrap();
+    run_git(&feat1_dir, &["add", "."]);
+    run_git(&feat1_dir, &["commit", "-m", "feat-1 conflicting change"]);
+
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["restack"], Some(&ws_path), home);
+    assert!(!ok, "restack should stop on conflict");
+    let combined = format!("{} {}", out, err);
+    assert!(
+        combined.contains("Conflict while restacking")
+            && combined.contains("two.txt")
+            && combined.contains(&feat2_dir.display().to_string())
+            && combined.contains("git rebase --continue"),
+        "expected structured conflict report, got: {}",
+        combined
+    );
+
+    // Resolve like an agent would: fix the file, continue the rebase.
+    std::fs::write(feat2_dir.join("two.txt"), "merged content").unwrap();
+    run_git(&feat2_dir, &["add", "two.txt"]);
+    let out = Command::new("git")
+        .args(["rebase", "--continue"])
+        .env("GIT_EDITOR", "true")
+        .current_dir(&feat2_dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "rebase --continue failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Re-run: feat-2 is detected as done (fork point healed), feat-3 rebases.
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["restack"], Some(&ws_path), home);
+    assert!(ok, "resumed restack failed: {} {}", out, err);
+    assert!(
+        out.contains("1 rebased") && out.contains("1 already up to date"),
+        "expected feat-2 skipped and feat-3 rebased, got: {}",
+        out
+    );
+
+    let _ = run_wtp_with_home(&["remove", "ws-conflict", "--force"], home);
+}
+
+#[test]
+fn test_restack_after_squash_merge_via_fork_point() {
+    let temp_home = setup_test_env();
+    let home = temp_home.path();
+
+    let repo_dir = TempDir::new().unwrap();
+    let repo_path = repo_dir.path();
+    init_git_repo(repo_path);
+    let repo_str = repo_path.to_str().unwrap();
+    let slug = repo_path.file_name().unwrap().to_str().unwrap();
+
+    let (ok, out, err) = run_wtp_with_home(&["create", "ws-squash", "--no-hook"], home);
+    assert!(ok, "create failed: {} {}", out, err);
+    let ws_path = home.join(".wtp").join("workspaces").join("ws-squash");
+
+    // feat-1 with two commits, feat-2 stacked on it with one commit.
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &["import", "--repo", repo_str, "-b", "feat-1"],
+        Some(&ws_path),
+        home,
+    );
+    assert!(ok, "feat-1 import failed: {} {}", out, err);
+    let feat1_dir = ws_path.join(slug);
+    for n in ["one", "two"] {
+        std::fs::write(feat1_dir.join(format!("{}.txt", n)), n).unwrap();
+        run_git(&feat1_dir, &["add", "."]);
+        run_git(&feat1_dir, &["commit", "-m", &format!("feat-1 {}", n)]);
+    }
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &["import", "-b", "feat-2", "--parent", "feat-1"],
+        Some(&feat1_dir),
+        home,
+    );
+    assert!(ok, "feat-2 import failed: {} {}", out, err);
+    let feat2_dirname = format!("{}@feat-2", slug);
+    let feat2_dir = ws_path.join(&feat2_dirname);
+    std::fs::write(feat2_dir.join("layer2.txt"), "l2").unwrap();
+    run_git(&feat2_dir, &["add", "."]);
+    run_git(&feat2_dir, &["commit", "-m", "feat-2 work"]);
+
+    // Squash-merge feat-1 into main (in the original repo), then drop the
+    // feat-1 layer and branch — the standard "bottom PR landed" flow.
+    run_git(repo_path, &["checkout", "main"]);
+    run_git(repo_path, &["merge", "--squash", "feat-1"]);
+    run_git(repo_path, &["commit", "-m", "feat-1 squashed into main"]);
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["eject", slug], Some(&ws_path), home);
+    assert!(ok, "eject feat-1 failed: {} {}", out, err);
+    run_git(repo_path, &["branch", "-D", "feat-1"]);
+
+    // Reparent feat-2 onto main and restack: the recorded fork point means
+    // only feat-2's own commit is replayed, so no conflict despite the
+    // squash (patch-ids of feat-1's commits don't match the squash commit).
+    let (ok, out, err) =
+        run_wtp_in_dir_with_home(&["retarget", &feat2_dirname, "main"], Some(&ws_path), home);
+    assert!(ok, "retarget failed: {} {}", out, err);
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["restack"], Some(&feat2_dir), home);
+    assert!(ok, "squash restack should be clean: {} {}", out, err);
+    assert!(out.contains("1 rebased"), "got: {}", out);
+
+    // feat-2 sits on the squash commit; feat-1's original commits are gone.
+    let log = git_log_subjects(&feat2_dir);
+    assert!(
+        log.contains("feat-2 work") && log.contains("feat-1 squashed into main"),
+        "feat-2 should sit on the squash commit: {}",
+        log
+    );
+    assert!(
+        !log.contains("feat-1 one") && !log.contains("feat-1 two"),
+        "feat-1's pre-squash commits must not be replayed: {}",
+        log
+    );
+
+    let _ = run_wtp_with_home(&["remove", "ws-squash", "--force"], home);
+}
+
 #[test]
 fn test_rm_is_alias_for_remove() {
     let temp_home = setup_test_env();
