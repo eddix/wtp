@@ -14,6 +14,6 @@ pub use config::{
     DisplayConfig, GlobalConfig, LoadedConfig, RepoColorMode, sanitize_workspace_name,
 };
 pub use error::Result;
-pub use git::{FullGitStatus, GitClient, GitStatus};
+pub use git::{FullGitStatus, GitClient, GitStatus, RebaseOutcome};
 pub use workspace::{CreateResult, WorkspaceInfo, WorkspaceManager};
 pub use worktree::{RepoRef, WorktreeEntry, WorktreeManager, WorktreeToml};

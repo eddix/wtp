@@ -44,9 +44,9 @@ pub async fn execute(args: StatusArgs, manager: WorkspaceManager) -> anyhow::Res
     }
 
     if args.long {
-        print_detailed_status(&git, worktrees, &workspace_path).await?;
+        print_detailed_status(&git, worktree_manager.config(), &workspace_path).await?;
     } else {
-        print_compact_status(&git, worktrees, &workspace_path).await?;
+        print_compact_status(&git, worktree_manager.config(), &workspace_path).await?;
     }
 
     Ok(())
@@ -54,7 +54,7 @@ pub async fn execute(args: StatusArgs, manager: WorkspaceManager) -> anyhow::Res
 
 async fn print_compact_status(
     git: &GitClient,
-    worktrees: &[wtp_core::WorktreeEntry],
+    config: &wtp_core::WorktreeToml,
     workspace_path: &std::path::Path,
 ) -> anyhow::Result<()> {
     println!(
@@ -64,7 +64,7 @@ async fn print_compact_status(
         "STATUS".bold()
     );
 
-    for wt in worktrees {
+    for (wt, depth) in config.stacked_order() {
         let wt_full_path = workspace_path.join(&wt.worktree_path);
         let repo_display = wt.repo.display();
 
@@ -72,7 +72,7 @@ async fn print_compact_status(
             println!(
                 "{:<30} {:<20} {}",
                 repo_display,
-                wt.branch.cyan(),
+                branch_cell(git, wt, depth, &wt_full_path),
                 "missing".red().bold()
             );
             continue;
@@ -86,7 +86,7 @@ async fn print_compact_status(
         println!(
             "{:<30} {:<20} {}",
             truncate_display(&repo_display, 30),
-            wt.branch.cyan(),
+            branch_cell(git, wt, depth, &wt_full_path),
             status_str
         );
     }
@@ -94,19 +94,63 @@ async fn print_compact_status(
     Ok(())
 }
 
+/// Format the BRANCH cell: tree indentation for stack layers plus the
+/// divergence from the parent ref (↑ commits unique to this layer,
+/// ↓ commits on the parent not yet restacked in).
+fn branch_cell(
+    git: &GitClient,
+    wt: &wtp_core::WorktreeEntry,
+    depth: usize,
+    wt_path: &std::path::Path,
+) -> String {
+    let indent = if depth > 0 {
+        format!("{}└ ", "  ".repeat(depth - 1))
+    } else {
+        String::new()
+    };
+    let mut cell = format!("{}{}", indent.dimmed(), wt.branch.cyan());
+    let Some(parent) = &wt.parent else {
+        return cell;
+    };
+    if !wt_path.exists() {
+        return cell;
+    }
+    match git.rev_parse(wt_path, parent) {
+        Ok(Some(_)) => {
+            if let Ok(Some((ahead, behind))) = git.get_ahead_behind(wt_path, parent) {
+                if ahead > 0 {
+                    cell.push_str(&format!(" {}", format!("↑{}", ahead).green()));
+                }
+                if behind > 0 {
+                    cell.push_str(&format!(" {}", format!("↓{}", behind).yellow()));
+                }
+            }
+        }
+        _ => {
+            cell.push_str(&format!(" {}", "(parent missing)".red()));
+        }
+    }
+    cell
+}
+
 async fn print_detailed_status(
     git: &GitClient,
-    worktrees: &[wtp_core::WorktreeEntry],
+    config: &wtp_core::WorktreeToml,
     workspace_path: &std::path::Path,
 ) -> anyhow::Result<()> {
     let separator = "\u{2500}".repeat(60);
 
-    for wt in worktrees.iter() {
+    for (wt, depth) in config.stacked_order() {
         let wt_full_path = workspace_path.join(&wt.worktree_path);
         let repo_display = wt.repo.display();
 
         println!("{}", separator.dimmed());
-        println!("  {}", repo_display.cyan().bold());
+        let stack_marker = if depth > 0 {
+            format!("{}└ ", "  ".repeat(depth - 1)).dimmed().to_string()
+        } else {
+            String::new()
+        };
+        println!("  {}{}", stack_marker, repo_display.cyan().bold());
         println!("{}", separator.dimmed());
 
         if !wt_full_path.exists() {
@@ -118,29 +162,58 @@ async fn print_detailed_status(
         // Branch
         println!("  {:<10} {}", "Branch:".bold(), wt.branch.cyan());
 
-        // Base branch divergence
-        if let Some(base) = &wt.base {
-            if base != "HEAD" {
-                let base_info = match git.get_ahead_behind(&wt_full_path, base) {
-                    Ok(Some((ahead, behind))) => {
-                        if ahead > 0 || behind > 0 {
-                            let mut parts = Vec::new();
-                            if ahead > 0 {
-                                parts.push(format!("{}", format!("+{} ahead", ahead).green()));
-                            }
-                            if behind > 0 {
-                                parts.push(format!("{}", format!("-{} behind", behind).red()));
-                            }
-                            format!("{} ({})", base.cyan(), parts.join(", "))
-                        } else {
-                            format!("{} {}", base.cyan(), "up to date".green())
+        // Stacked parent divergence
+        if let Some(parent) = &wt.parent {
+            let parent_info = match git.rev_parse(&wt_full_path, parent) {
+                Ok(Some(_)) => match git.get_ahead_behind(&wt_full_path, parent) {
+                    Ok(Some((ahead, behind))) if ahead > 0 || behind > 0 => {
+                        let mut parts = Vec::new();
+                        if ahead > 0 {
+                            parts.push(format!("{}", format!("+{} ahead", ahead).green()));
                         }
+                        if behind > 0 {
+                            parts.push(format!("{}", format!("-{} behind", behind).yellow()));
+                        }
+                        format!("{} ({})", parent.cyan(), parts.join(", "))
                     }
-                    Ok(None) => format!("{} {}", base.cyan(), "up to date".green()),
-                    Err(_) => format!("{} {}", base.cyan(), "unknown".dimmed()),
-                };
-                println!("  {:<10} {}", "Base:".bold(), base_info);
-            }
+                    Ok(Some(_)) | Ok(None) => {
+                        format!("{} {}", parent.cyan(), "up to date".green())
+                    }
+                    Err(_) => format!("{} {}", parent.cyan(), "unknown".dimmed()),
+                },
+                _ => format!(
+                    "{} {} (branch deleted or ref not found)",
+                    parent.cyan(),
+                    "missing".red().bold()
+                ),
+            };
+            println!("  {:<10} {}", "Parent:".bold(), parent_info);
+        }
+
+        // Base branch divergence (skipped for stack layers: base == parent)
+        if wt.parent.is_none()
+            && let Some(base) = &wt.base
+            && base != "HEAD"
+        {
+            let base_info = match git.get_ahead_behind(&wt_full_path, base) {
+                Ok(Some((ahead, behind))) => {
+                    if ahead > 0 || behind > 0 {
+                        let mut parts = Vec::new();
+                        if ahead > 0 {
+                            parts.push(format!("{}", format!("+{} ahead", ahead).green()));
+                        }
+                        if behind > 0 {
+                            parts.push(format!("{}", format!("-{} behind", behind).red()));
+                        }
+                        format!("{} ({})", base.cyan(), parts.join(", "))
+                    } else {
+                        format!("{} {}", base.cyan(), "up to date".green())
+                    }
+                }
+                Ok(None) => format!("{} {}", base.cyan(), "up to date".green()),
+                Err(_) => format!("{} {}", base.cyan(), "unknown".dimmed()),
+            };
+            println!("  {:<10} {}", "Base:".bold(), base_info);
         }
 
         // HEAD: hash + subject + relative time

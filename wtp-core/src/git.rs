@@ -392,6 +392,112 @@ impl GitClient {
         }
     }
 
+    /// Resolve a ref to a commit hash. Returns `Ok(None)` if the ref does
+    /// not exist in the repository.
+    pub fn rev_parse(&self, repo_path: &Path, git_ref: &str) -> Result<Option<String>> {
+        validate_git_ref(git_ref, "reference")?;
+
+        let output = Command::new("git")
+            .current_dir(repo_path)
+            .arg("rev-parse")
+            .arg("--verify")
+            .arg("--quiet")
+            .arg(format!("{}^{{commit}}", git_ref))
+            .output()?;
+
+        if !output.status.success() {
+            return Ok(None);
+        }
+        Ok(Some(
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        ))
+    }
+
+    /// Find the merge base of two refs. Returns `Ok(None)` if either ref is
+    /// missing or the refs share no common ancestor.
+    pub fn merge_base(&self, repo_path: &Path, a: &str, b: &str) -> Result<Option<String>> {
+        validate_git_ref(a, "reference")?;
+        validate_git_ref(b, "reference")?;
+
+        let output = Command::new("git")
+            .current_dir(repo_path)
+            .arg("merge-base")
+            .arg(a)
+            .arg(b)
+            .output()?;
+
+        if !output.status.success() {
+            return Ok(None);
+        }
+        Ok(Some(
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        ))
+    }
+
+    /// Whether the worktree has an interrupted rebase (rebase-merge or
+    /// rebase-apply state directory present).
+    pub fn has_rebase_in_progress(&self, worktree_path: &Path) -> bool {
+        for state_dir in ["rebase-merge", "rebase-apply"] {
+            let output = Command::new("git")
+                .current_dir(worktree_path)
+                .args(["rev-parse", "--git-path", state_dir])
+                .output();
+            if let Ok(out) = output
+                && out.status.success()
+            {
+                let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                let path = Path::new(&path);
+                let abs = if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    worktree_path.join(path)
+                };
+                if abs.exists() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Rebase the branch checked out in `worktree_path` onto `newbase`,
+    /// replaying only the commits after `upstream`
+    /// (`git rebase --onto <newbase> <upstream>`).
+    ///
+    /// On conflict the rebase is left in progress (for a human or agent to
+    /// resolve in the worktree) and the conflicted paths are returned.
+    pub fn rebase_onto(
+        &self,
+        worktree_path: &Path,
+        newbase: &str,
+        upstream: &str,
+    ) -> Result<RebaseOutcome> {
+        validate_git_ref(newbase, "rebase target")?;
+        validate_git_ref(upstream, "upstream reference")?;
+
+        let output = Command::new("git")
+            .current_dir(worktree_path)
+            .args(["rebase", "--onto", newbase, upstream])
+            .output()?;
+
+        if output.status.success() {
+            return Ok(RebaseOutcome::Completed);
+        }
+
+        if self.has_rebase_in_progress(worktree_path) {
+            let conflicts = self
+                .run_git(worktree_path, &["diff", "--name-only", "--diff-filter=U"])
+                .map(|s| s.lines().map(str::to_string).collect())
+                .unwrap_or_default();
+            return Ok(RebaseOutcome::Conflict { conflicts });
+        }
+
+        Err(WtpError::git(format!(
+            "Rebase failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )))
+    }
+
     /// Get combined status and stash information for a repository.
     pub fn get_full_status(&self, repo_path: &Path) -> Result<FullGitStatus> {
         let output = Command::new("git")
@@ -489,6 +595,16 @@ impl Default for GitClient {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Result of a rebase attempt started by [`GitClient::rebase_onto`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RebaseOutcome {
+    /// The rebase finished cleanly.
+    Completed,
+    /// The rebase stopped on conflicts and is left in progress in the
+    /// worktree; `conflicts` lists the unmerged paths.
+    Conflict { conflicts: Vec<String> },
 }
 
 /// Git status information

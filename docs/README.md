@@ -17,6 +17,7 @@ Each design document has a corresponding review with the same filename, so it's 
 | Cargo workspace restructure | [`design/workspace-restructure.md`](design/workspace-restructure.md) | [`reviews/workspace-restructure.md`](reviews/workspace-restructure.md) |
 | wtp-gui implementation | [`design/gui-implementation.md`](design/gui-implementation.md) | [`reviews/gui-implementation.md`](reviews/gui-implementation.md) |
 | Audit fixes (security / perf / quality) | [`design/audit-fixes.md`](design/audit-fixes.md) | [`reviews/audit-fixes.md`](reviews/audit-fixes.md) |
+| Stacked worktree (纵向开发) | [`design/stacked-worktree.md`](design/stacked-worktree.md) | — |
 
 ## Standalone audit reports
 

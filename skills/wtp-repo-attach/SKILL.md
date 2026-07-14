@@ -57,6 +57,14 @@ wtp import company/another-repo
    - otherwise `default_host` may be used
    - if no host is configured, a plain path may be treated as a filesystem path instead
 
+## Interactive fallback
+
+`wtp import` run without a PATH (and without `--repo`) does not fail fast: in
+an interactive terminal it opens a fuzzy finder to pick the host and repo, and
+in a non-interactive terminal it errors out asking for explicit arguments.
+Agents should always pass the repo reference explicitly and never rely on the
+picker.
+
 ## Safety and correctness checks
 
 Before attaching a repo:
@@ -130,3 +138,4 @@ Avoid these mistakes:
 - using `wtp switch` while not inside the source repository
 - assuming host aliases exist without checking configuration
 - forcing branch/base parameters when `wtp` defaults are sufficient
+- running `wtp import` without an explicit repo reference and expecting a non-interactive result

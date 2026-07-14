@@ -76,10 +76,7 @@ impl WorkspaceManager {
                 name
             )));
         }
-        let workspace_path = self
-            .global_config()
-            .workspace_root
-            .join(&effective_name);
+        let workspace_path = self.global_config().workspace_root.join(&effective_name);
 
         // Check if workspace already exists (directory with .wtp subdirectory)
         if workspace_path.join(WTP_DIR).exists() {

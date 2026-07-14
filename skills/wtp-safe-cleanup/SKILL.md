@@ -38,6 +38,8 @@ Use this skill when an agent needs to clean up a `wtp` workspace or detach repos
 
 1. Run `wtp status` if current state is unclear
 2. Identify the target worktree by directory name, repo slug, or display name
+   — always pass it explicitly: `wtp eject` without an argument opens an
+   interactive picker in a terminal and errors out in non-interactive runs
    - When the workspace holds several branches of the same repository
      (directories like `project/` and `project@release-b/`), always use the
      worktree directory name — a bare slug matching multiple worktrees is
