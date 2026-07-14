@@ -9,6 +9,8 @@ These skills are not for developing `wtp` itself. They are for helping coding ag
 - `wtp-workspace-operator` — create, inspect, reuse, and remove workspaces
 - `wtp-repo-attach` — attach the current repo or another repo into a workspace
 - `wtp-safe-cleanup` — safely eject worktrees and remove workspaces
+- `wtp-configure` — inspect configuration, manage host aliases, hooks, and defaults
+- `wtp-setup` — install/upgrade the binary, shell integration, and completions
 
 ## Design goals
 
@@ -17,6 +19,7 @@ These skills are not for developing `wtp` itself. They are for helping coding ag
 - Avoid relying on `wtp cd` for agent execution flows
 - Treat dirty worktrees and `--force` as explicit safety boundaries
 - Return workspace paths and repo layout in a way agents can continue using directly
+- Always pass explicit arguments — commands like `wtp import` and `wtp eject` fall back to an interactive fuzzy finder when run without them (and error out in non-interactive terminals)
 
 ## Recommended usage model
 

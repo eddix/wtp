@@ -34,8 +34,11 @@ under:
 
 - `wtp ls`
 - `wtp ls --short`
+- `wtp ls --long`
+- `wtp ls --grep <pattern>`
 - `wtp create <name>`
 - `wtp status`
+- `wtp status --long`
 - `wtp rm <name>`
 
 ## Operating rules
@@ -43,6 +46,11 @@ under:
 1. Start by discovering state.
    - Use `wtp ls --short` when the goal is simple existence/completion logic.
    - Use `wtp ls` or `wtp status` when the user needs a readable summary.
+   - Use `wtp ls --grep <pattern>` to answer "which workspaces contain repo X"
+     — it filters by case-insensitive substring match on the attached repos,
+     not on the workspace name.
+   - Use `--long` on `ls` or `status` when dirty/clean state and branch details
+     matter (for example before cleanup decisions).
 
 2. Prefer reuse over unnecessary creation.
    - If a workspace with the intended task name already exists and matches the task, reuse it.
