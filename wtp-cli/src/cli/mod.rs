@@ -13,6 +13,7 @@ pub mod import;
 pub mod ls;
 pub mod remove;
 pub mod repo_color;
+pub mod retarget;
 pub mod shell_init;
 pub mod status;
 pub mod switch;
@@ -337,6 +338,9 @@ pub enum Commands {
     /// Import a repository's worktree into a workspace
     #[cmd_group("Repository Operations")]
     Import(import::ImportArgs),
+    /// Change the stack parent of a worktree (metadata only)
+    #[cmd_group("Repository Operations")]
+    Retarget(retarget::RetargetArgs),
     /// Switch current repo to a workspace
     #[cmd_group("Repository Operations")]
     Switch(switch::SwitchArgs),
@@ -416,6 +420,9 @@ pub async fn run() -> anyhow::Result<()> {
         }
         Commands::Import(args) => {
             import::execute(args, wtp_core::WorkspaceManager::new(loaded_config)).await?
+        }
+        Commands::Retarget(args) => {
+            retarget::execute(args, wtp_core::WorkspaceManager::new(loaded_config)).await?
         }
         Commands::Switch(args) => {
             let manager = wtp_core::WorkspaceManager::new(loaded_config);

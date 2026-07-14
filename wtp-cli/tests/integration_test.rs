@@ -896,6 +896,121 @@ fn test_import_parent_creates_stacked_layer() {
 }
 
 #[test]
+fn test_retarget_and_eject_hint() {
+    let temp_home = setup_test_env();
+    let home = temp_home.path();
+
+    let repo_dir = TempDir::new().unwrap();
+    let repo_path = repo_dir.path();
+    init_git_repo(repo_path);
+    let repo_str = repo_path.to_str().unwrap();
+    let slug = repo_path.file_name().unwrap().to_str().unwrap();
+
+    let (ok, out, err) = run_wtp_with_home(&["create", "ws-rt", "--no-hook"], home);
+    assert!(ok, "create failed: {} {}", out, err);
+    let ws_path = home.join(".wtp").join("workspaces").join("ws-rt");
+
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &["import", "--repo", repo_str, "-b", "feat-1"],
+        Some(&ws_path),
+        home,
+    );
+    assert!(ok, "bottom import failed: {} {}", out, err);
+    let feat1_dir = ws_path.join(slug);
+    let (ok, out, err) = run_wtp_in_dir_with_home(
+        &["import", "-b", "feat-2", "--parent", "feat-1"],
+        Some(&feat1_dir),
+        home,
+    );
+    assert!(ok, "stacked import failed: {} {}", out, err);
+    let feat2_dirname = format!("{}@feat-2", slug);
+    let feat2_dir = ws_path.join(&feat2_dirname);
+    let toml_path = ws_path.join(".wtp").join("worktree.toml");
+    let fork_point_before = std::fs::read_to_string(&toml_path)
+        .unwrap()
+        .lines()
+        .find(|l| l.starts_with("parent_head"))
+        .unwrap()
+        .to_string();
+
+    // Two-argument form from the workspace root; the old fork point must
+    // survive the retarget (squash-merge transplant relies on it).
+    let (ok, out, err) =
+        run_wtp_in_dir_with_home(&["retarget", &feat2_dirname, "main"], Some(&ws_path), home);
+    assert!(ok, "retarget failed: {} {}", out, err);
+    assert!(
+        out.contains("wtp restack"),
+        "expected restack hint, got: {}",
+        out
+    );
+    let toml_text = std::fs::read_to_string(&toml_path).unwrap();
+    assert!(
+        toml_text.contains("parent = \"main\""),
+        "parent not updated: {}",
+        toml_text
+    );
+    assert!(
+        toml_text.contains(&fork_point_before),
+        "fork point must be preserved across retarget: {}",
+        toml_text
+    );
+
+    // One-argument form from inside the worktree directory.
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["retarget", "feat-1"], Some(&feat2_dir), home);
+    assert!(ok, "one-arg retarget failed: {} {}", out, err);
+    let toml_text = std::fs::read_to_string(&toml_path).unwrap();
+    assert!(toml_text.contains("parent = \"feat-1\""), "{}", toml_text);
+
+    // Cycle: feat-1 cannot be reparented onto its own descendant.
+    let (ok, out, err) =
+        run_wtp_in_dir_with_home(&["retarget", slug, "feat-2"], Some(&ws_path), home);
+    assert!(!ok, "cycle retarget should fail");
+    let combined = format!("{} {}", out, err);
+    assert!(
+        combined.contains("cycle"),
+        "expected cycle error: {}",
+        combined
+    );
+
+    // Self-parent and unknown refs are rejected.
+    let (ok, _, _) = run_wtp_in_dir_with_home(&["retarget", "feat-2"], Some(&feat2_dir), home);
+    assert!(!ok, "self-parent should fail");
+    let (ok, out, err) =
+        run_wtp_in_dir_with_home(&["retarget", "no-such-ref"], Some(&feat2_dir), home);
+    assert!(!ok, "unknown ref should fail");
+    let combined = format!("{} {}", out, err);
+    assert!(
+        combined.contains("not found"),
+        "expected not-found error: {}",
+        combined
+    );
+
+    // A flat worktree gaining a parent for the first time gets a fork point.
+    let (ok, out, err) =
+        run_wtp_in_dir_with_home(&["retarget", slug, "main"], Some(&ws_path), home);
+    assert!(ok, "flat retarget failed: {} {}", out, err);
+    let toml_text = std::fs::read_to_string(&toml_path).unwrap();
+    assert_eq!(
+        toml_text.matches("parent_head = \"").count(),
+        2,
+        "flat worktree should gain a fork point: {}",
+        toml_text
+    );
+
+    // Ejecting a layer that has stack children prints a reparent hint.
+    let (ok, out, err) = run_wtp_in_dir_with_home(&["eject", slug], Some(&ws_path), home);
+    assert!(ok, "eject failed: {} {}", out, err);
+    let combined = format!("{} {}", out, err);
+    assert!(
+        combined.contains("wtp retarget") && combined.contains("feat-2"),
+        "expected stack-children hint on eject, got: {}",
+        combined
+    );
+
+    let _ = run_wtp_with_home(&["remove", "ws-rt", "--force"], home);
+}
+
+#[test]
 fn test_rm_is_alias_for_remove() {
     let temp_home = setup_test_env();
     let home = temp_home.path();

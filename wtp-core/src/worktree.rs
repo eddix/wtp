@@ -304,6 +304,38 @@ impl WorktreeToml {
             .find(|w| w.repo == entry.repo && w.branch == parent)
     }
 
+    /// Worktrees of the same repository whose parent is `entry`'s branch
+    /// (its direct stack children).
+    pub fn children_of(&self, entry: &WorktreeEntry) -> Vec<&WorktreeEntry> {
+        self.worktrees
+            .iter()
+            .filter(|w| w.repo == entry.repo && w.parent.as_deref() == Some(&entry.branch))
+            .collect()
+    }
+
+    /// Whether setting `entry`'s parent to `new_parent` would create a cycle
+    /// among the stack layers of the same repository. Walks up the layer
+    /// chain starting at `new_parent`; reaching `entry` again is a cycle.
+    pub fn would_create_cycle(&self, entry: &WorktreeEntry, new_parent: &str) -> bool {
+        let mut current = new_parent.to_string();
+        // Bounded by the worktree count: walking longer than that means the
+        // existing chain already contains a cycle — refuse to extend it.
+        for _ in 0..=self.worktrees.len() {
+            if current == entry.branch {
+                return true;
+            }
+            let layer = self
+                .worktrees
+                .iter()
+                .find(|w| w.repo == entry.repo && w.branch == current);
+            match layer.and_then(|w| w.parent.clone()) {
+                Some(next) => current = next,
+                None => return false,
+            }
+        }
+        true
+    }
+
     /// Order worktrees for stacked display and restack: parents come before
     /// children (DFS), and each entry carries its stack depth. Entries whose
     /// parent is not a layer in this workspace (including entries with no
@@ -433,6 +465,39 @@ impl WorktreeManager {
         }
         self.config.clear();
         self.save()
+    }
+
+    /// Set the stack parent of the worktree identified by `key` (directory
+    /// name, slug, or display name — see [`WorktreeToml::find_by_slug`]) and
+    /// save. `parent_head` replaces the stored fork point only when `Some`;
+    /// passing `None` keeps the existing one (retarget relies on this to
+    /// preserve the fork point across a squash-merge).
+    /// Returns false if no worktree matches `key`.
+    pub fn set_parent(
+        &mut self,
+        key: &str,
+        parent: String,
+        parent_head: Option<String>,
+    ) -> crate::Result<bool> {
+        let Some(path) = self
+            .config
+            .find_by_slug(key)?
+            .map(|w| w.worktree_path.clone())
+        else {
+            return Ok(false);
+        };
+        let entry = self
+            .config
+            .worktrees
+            .iter_mut()
+            .find(|w| w.worktree_path == path)
+            .expect("entry vanished between lookup and update");
+        entry.parent = Some(parent);
+        if parent_head.is_some() {
+            entry.parent_head = parent_head;
+        }
+        self.save()?;
+        Ok(true)
     }
 }
 
@@ -711,6 +776,47 @@ mod tests {
         assert_eq!(order.len(), 2);
         let branches: Vec<&str> = order.iter().map(|(e, _)| e.branch.as_str()).collect();
         assert!(branches.contains(&"a") && branches.contains(&"b"));
+    }
+
+    #[test]
+    fn children_of_finds_direct_children_same_repo_only() {
+        let mut toml = stacked_toml();
+        // Same parent branch name in another repo — must not count.
+        toml.add_worktree(stacked_entry(
+            hosted("gh", "owner/unrelated"),
+            "x",
+            "unrelated@x",
+            "feat-1",
+        ));
+        let feat1 = toml.find_by_slug("myrepo").unwrap().unwrap().clone();
+        let children = toml.children_of(&feat1);
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].branch, "feat-2");
+    }
+
+    #[test]
+    fn would_create_cycle_detects_self_and_descendants() {
+        let toml = stacked_toml();
+        let feat1 = toml.find_by_slug("myrepo").unwrap().unwrap().clone();
+        // feat-1 <- feat-2 <- feat-3: pointing feat-1 at any of them cycles.
+        assert!(toml.would_create_cycle(&feat1, "feat-1"));
+        assert!(toml.would_create_cycle(&feat1, "feat-2"));
+        assert!(toml.would_create_cycle(&feat1, "feat-3"));
+        // Unrelated refs and other repos' branches do not cycle.
+        assert!(!toml.would_create_cycle(&feat1, "main"));
+        assert!(!toml.would_create_cycle(&feat1, "origin/main"));
+        let feat3 = toml.find_by_slug("myrepo@feat-3").unwrap().unwrap().clone();
+        assert!(!toml.would_create_cycle(&feat3, "feat-1"));
+    }
+
+    #[test]
+    fn would_create_cycle_survives_preexisting_cycle() {
+        let mut toml = WorktreeToml::new();
+        toml.add_worktree(stacked_entry(hosted("gh", "o/r"), "a", "r@a", "b"));
+        toml.add_worktree(stacked_entry(hosted("gh", "o/r"), "b", "r@b", "a"));
+        let other = entry(hosted("gh", "o/r"), "c", "r@c");
+        // Attaching to a chain that already cycles must be refused, not hang.
+        assert!(toml.would_create_cycle(&other, "a"));
     }
 
     #[test]

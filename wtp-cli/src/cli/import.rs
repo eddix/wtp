@@ -83,12 +83,14 @@ pub async fn execute(args: ImportArgs, manager: WorkspaceManager) -> anyhow::Res
         // of the one I'm standing in" flow). Never falls through to the
         // interactive picker — stacking on a fuzzy-picked repo is too easy
         // to get wrong.
-        detect_current_worktree_repo(&workspace_path, &worktree_manager)?.ok_or_else(|| {
-            anyhow::anyhow!(
-                "--parent without PATH only works inside a worktree directory of this workspace.\n\
-                 Run it from the parent layer's directory, or pass the repository explicitly."
-            )
-        })?
+        common::detect_current_worktree(&workspace_path, worktree_manager.config())?
+            .map(|w| w.repo)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "--parent without PATH only works inside a worktree directory of this workspace.\n\
+                     Run it from the parent layer's directory, or pass the repository explicitly."
+                )
+            })?
     } else {
         // No path or repo specified — interactive selection
         resolve_repo_interactively(&manager, args.host.as_deref())?
@@ -206,28 +208,6 @@ pub async fn execute(args: ImportArgs, manager: WorkspaceManager) -> anyhow::Res
     println!("{} Worktree imported successfully!", "✓".green().bold());
 
     Ok(())
-}
-
-/// When run inside a worktree directory of the current workspace, return
-/// that worktree's repository reference.
-fn detect_current_worktree_repo(
-    workspace_path: &std::path::Path,
-    worktree_manager: &WorktreeManager,
-) -> anyhow::Result<Option<RepoRef>> {
-    let cwd = std::env::current_dir()?;
-    let Ok(rel) = cwd.strip_prefix(workspace_path) else {
-        return Ok(None);
-    };
-    let Some(first) = rel.components().next() else {
-        return Ok(None);
-    };
-    let dir = std::path::Path::new(first.as_os_str());
-    Ok(worktree_manager
-        .config()
-        .worktrees
-        .iter()
-        .find(|w| w.worktree_path == dir)
-        .map(|w| w.repo.clone()))
 }
 
 /// Resolve repository interactively when no path is provided.

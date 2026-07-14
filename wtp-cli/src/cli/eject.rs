@@ -63,6 +63,23 @@ pub async fn execute(args: EjectArgs, manager: WorkspaceManager) -> anyhow::Resu
     let repo_display = entry.repo.display();
     let branch = entry.branch.clone();
     let worktree_path_rel = entry.worktree_path.clone();
+
+    // Ejecting a layer that other layers stack on does not break the chain:
+    // the branch stays in the repository and the children's parent refs
+    // still resolve. Point it out so nobody is surprised later.
+    let children = worktree_manager.config().children_of(entry);
+    if !children.is_empty() {
+        let names: Vec<String> = children.iter().map(|c| c.branch.clone()).collect();
+        eprintln!(
+            "{} Stack layer(s) {} have parent '{}'. The branch itself stays in \
+             the repository, so the stack keeps working; if you also delete the \
+             branch, reparent them with {}.",
+            "Note:".yellow().bold(),
+            names.join(", ").cyan(),
+            branch.cyan(),
+            "wtp retarget".bold()
+        );
+    }
     let worktree_path_abs = workspace_path.join(&worktree_path_rel);
     // H2 fix: validate worktree path is within workspace
     wtp_core::fence::validate_within_boundary(&workspace_path, &worktree_path_abs)?;

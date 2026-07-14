@@ -35,6 +35,27 @@ pub fn check_workspace_boundary(
     Ok(())
 }
 
+/// When the current directory is inside a worktree of `workspace_path`,
+/// return that worktree's entry.
+pub fn detect_current_worktree(
+    workspace_path: &Path,
+    config: &wtp_core::WorktreeToml,
+) -> anyhow::Result<Option<WorktreeEntry>> {
+    let cwd = std::env::current_dir()?;
+    let Ok(rel) = cwd.strip_prefix(workspace_path) else {
+        return Ok(None);
+    };
+    let Some(first) = rel.components().next() else {
+        return Ok(None);
+    };
+    let dir = Path::new(first.as_os_str());
+    Ok(config
+        .worktrees
+        .iter()
+        .find(|w| w.worktree_path == dir)
+        .cloned())
+}
+
 /// Create a worktree for a repository in a workspace.
 /// Returns (absolute_worktree_path, WorktreeEntry).
 ///
