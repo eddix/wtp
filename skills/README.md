@@ -11,6 +11,7 @@ These skills are not for developing `wtp` itself. They are for helping coding ag
 - `wtp-safe-cleanup` — safely eject worktrees and remove workspaces
 - `wtp-configure` — inspect configuration, manage host aliases, hooks, and defaults
 - `wtp-setup` — install/upgrade the binary, shell integration, and completions
+- `wtp-stacked-worktree` — stacked-PR style layers in one repo: create, restack, retarget
 
 ## Design goals
 

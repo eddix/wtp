@@ -91,8 +91,10 @@ Commands are grouped visually in help output but kept flat (not nested).
 - `wtp status [--workspace <name>] [--long] [--dirty]` - Show workspace status
 
 ### Repository Operations
-- `wtp import [path] [--workspace <name>] [--host <alias>] [--repo <path>] [--branch <name>] [--base <ref>]` - Import repo worktree into workspace
+- `wtp import [path] [--workspace <name>] [--host <alias>] [--repo <path>] [--branch <name>] [--base <ref>] [--parent <ref>]` - Import repo worktree into workspace; `--parent` stacks a layer on an existing branch (implies `--with-branch-name`, conflicts with `--base`)
 - `wtp switch <workspace> [--create] [--branch <name>] [--base <ref>]` - Switch current repo to workspace
+- `wtp restack` - Cascade-rebase stack layers onto their parents (chain scope inside a worktree dir, all chains from workspace root)
+- `wtp retarget [<worktree-dir>] <new-parent>` - Change a worktree's stack parent (metadata only, then `wtp restack`)
 
 ### Utilities
 - `wtp host <add|ls|rm|set-default>` - Manage host aliases

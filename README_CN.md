@@ -290,6 +290,10 @@ wtp import company/project -b feature-xyz
 # 指定新分支的基准
 wtp import company/project -B main
 
+# 在当前所在分支上叠一层（见下文「Stacked Worktree」）。
+# 在 worktree 目录内运行时 PATH 可省略，自动推导当前仓库
+wtp import -b feature-xyz-2 --parent feature-xyz
+
 # 交互模式：不带参数运行，模糊搜索选择仓库
 wtp import
 ```
@@ -321,6 +325,50 @@ wtp eject
 ```
 
 命令从当前目录检测工作空间。移除后，worktree 记录会从 `.wtp/worktree.toml` 中删除。
+
+### `wtp restack` - 将 stack 各层 rebase 到各自 parent 上
+
+下层分支前进后，级联重堆上面的层（见下文「Stacked Worktree」）。
+
+```bash
+# 在某层 worktree 目录内运行：只重堆该层所在的整条链
+cd ~/.wtp/workspaces/feature-x/project@feature-xyz-2
+wtp restack
+
+# 在工作空间根运行：重堆工作空间内的所有链
+cd ~/.wtp/workspaces/feature-x
+wtp restack
+```
+
+行为：
+- **预检快速失败**：任何一层有未提交更改、进行中的 rebase、目录缺失或
+  parent 无法解析，都会在开始前一次性列出并拒绝执行
+- 每层在自己的 worktree 里执行 `git rebase --onto <parent> <fork_point>`，
+  只重放该层独有的 commit——底层被 squash merge 后也能干净移植
+- **无状态、幂等**：已经基于 parent 的层自动跳过；冲突时停下并打印
+  worktree 路径、冲突文件和处理指引——解决后 `git rebase --continue`，
+  再跑一次 `wtp restack` 就会从中断处继续
+- wtp 永不 push：结束时列出被改写的分支和
+  `git push --force-with-lease` 命令模板
+
+### `wtp retarget` - 改挂 worktree 的 stack parent
+
+只改元数据，不动 git 历史。典型场景：stack 底层的 PR 合入后，它的子层
+需要改挂到 `main` 上。
+
+```bash
+# 在某层 worktree 目录内运行：改挂当前层
+wtp retarget main
+
+# 在工作空间任意位置：显式指定 worktree
+wtp retarget project@feature-xyz-2 main
+
+# 然后应用变更
+wtp restack
+```
+
+自指、不存在的 ref、成环都会被拒绝。已记录的 fork point 会保留——
+这正是 squash merge 之后 restack 能干净通过的关键。
 
 ### `wtp switch <WORKSPACE>` - 将当前仓库加入工作空间
 
@@ -498,6 +546,54 @@ wtp import company/project -b release-area-b-dev --with-branch-name # project@re
   worktree 时会报歧义错误
 - 同一仓库的所有 worktree 共享同一套 git refs、stash 和 config——这是
   `git worktree` 的标准行为
+
+### Stacked Worktree（纵向开发）
+
+除了跨仓库的横向开发，wtp 还支持在**同一个仓库内**做 stacked PR 式的
+纵向开发：一条相互依赖的分支链，每层一个独立的 worktree 目录。
+
+```bash
+cd ~/.wtp/workspaces/feature-x/project        # 站在 feat-1 上
+wtp import -b feat-2 --parent feat-1          # 往上叠 feat-2
+cd ../project@feat-2
+wtp import -b feat-3 --parent feat-2          # 再叠 feat-3
+```
+
+```
+~/.wtp/workspaces/feature-x/
+├── project/            # feat-1（stack 底层）
+├── project@feat-2/     # feat-2，parent: feat-1
+└── project@feat-3/     # feat-3，parent: feat-2
+```
+
+`wtp status` 会把链画成树，并显示每层相对 parent 的分歧
+（`↑` 本层独有 commit 数，`↓` parent 上还没重堆进来的 commit 数）：
+
+```
+REPOSITORY      BRANCH           STATUS
+project         feat-1           ✓ clean
+project         └ feat-2 ↑2      ✓ clean
+project           └ feat-3 ↑1    ✓ clean
+```
+
+各部分的职责：
+
+- `--parent` 在 `.wtp/worktree.toml` 里记录链的边和 **fork point**
+  （本层从 parent 的哪个 commit 上切出来）
+- `wtp restack` 级联重堆，每层只重放自己独有的 commit
+- `wtp retarget` 在底层合入后改挂边
+- parent 可以是**任意 ref**，不限于另一层：底层可以挂 `origin/main`
+  追踪主干；parent 分支合并删除后，孤儿层可以改挂到 `main`
+
+相比单 checkout 里切分支（`git rebase --update-refs`、Graphite），
+每层一个目录的好处：底层在等 review 时你继续写上层，review 意见来了
+直接 `cd` 下去改——不用 stash、不用切换上下文；每层还能各自跑一个
+coding agent。
+
+完整设计与动机见
+[`docs/design/stacked-worktree.md`](docs/design/stacked-worktree.md)。
+wtp 刻意不碰 forge——不建 PR、不改 PR base、不 push，请配合
+`gh`/`glab` 等 forge CLI 使用。
 
 ### Host 别名
 

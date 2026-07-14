@@ -292,6 +292,10 @@ wtp import company/project -b feature-xyz
 # Specify base for new branch
 wtp import company/project -B main
 
+# Stack a new layer on the branch you're standing on (see Stacked
+# Worktrees below). Run inside a worktree directory: PATH is inferred
+wtp import -b feature-xyz-2 --parent feature-xyz
+
 # Interactive mode: run with no arguments to fuzzy-select a repo
 wtp import
 ```
@@ -323,6 +327,55 @@ wtp eject
 ```
 
 The command detects the workspace from your current directory. After ejecting, the worktree record is removed from `.wtp/worktree.toml`.
+
+### `wtp restack` - Rebase Stack Layers onto Their Parents
+
+Cascade-rebase stacked worktrees (see [Stacked Worktrees](#stacked-worktrees-vertical-development)) after a lower layer moved.
+
+```bash
+# Inside a worktree directory: restack that worktree's whole chain
+cd ~/.wtp/workspaces/feature-x/project@feature-xyz-2
+wtp restack
+
+# From the workspace root: restack every chain in the workspace
+cd ~/.wtp/workspaces/feature-x
+wtp restack
+```
+
+Behavior:
+- **Fail-fast preflight**: refuses to start if any layer has uncommitted
+  changes, a rebase in progress, a missing directory, or an unresolvable
+  parent — all problems are listed at once
+- Each layer runs `git rebase --onto <parent> <fork_point>` in its own
+  worktree, replaying only that layer's own commits — a squash-merged
+  bottom layer transplants cleanly
+- **Stateless and idempotent**: layers already based on their parent are
+  skipped; on conflict the run stops with the worktree path, conflicted
+  files, and instructions — resolve, `git rebase --continue`, then re-run
+  `wtp restack` and it continues where it left off
+- wtp never pushes: rewritten branches are listed at the end with
+  `git push --force-with-lease` templates
+
+### `wtp retarget` - Change a Worktree's Stack Parent
+
+Metadata-only: rewires the stack edge and leaves git history untouched.
+Typical use: the bottom PR of a stack merged, so its child now belongs on
+`main`.
+
+```bash
+# Inside a worktree directory: retarget the layer you're standing in
+wtp retarget main
+
+# From anywhere in the workspace: name the worktree explicitly
+wtp retarget project@feature-xyz-2 main
+
+# Then apply the change
+wtp restack
+```
+
+Self-parenting, unknown refs, and cycles are rejected. The recorded fork
+point is preserved, which is exactly what makes the post-squash-merge
+restack clean.
 
 ### `wtp switch <WORKSPACE>` - Switch Current Repo to Workspace
 
@@ -502,6 +555,58 @@ Notes:
   several worktrees is rejected as ambiguous
 - All worktrees of one repository share the same git refs, stash, and config —
   this is standard `git worktree` behavior
+
+### Stacked Worktrees (Vertical Development)
+
+Beyond working *across* repositories (horizontal), wtp supports stacked-PR
+style development *within* one repository (vertical): a chain of dependent
+branches, each in its own worktree directory.
+
+```bash
+cd ~/.wtp/workspaces/feature-x/project        # standing on feat-1
+wtp import -b feat-2 --parent feat-1          # stack feat-2 on top
+cd ../project@feat-2
+wtp import -b feat-3 --parent feat-2          # and feat-3 above that
+```
+
+```
+~/.wtp/workspaces/feature-x/
+├── project/            # feat-1 (bottom of the stack)
+├── project@feat-2/     # feat-2, parent: feat-1
+└── project@feat-3/     # feat-3, parent: feat-2
+```
+
+`wtp status` renders the chain as a tree with each layer's divergence from
+its parent (`↑` commits of its own, `↓` commits it needs restacked in):
+
+```
+REPOSITORY      BRANCH           STATUS
+project         feat-1           ✓ clean
+project         └ feat-2 ↑2      ✓ clean
+project           └ feat-3 ↑1    ✓ clean
+```
+
+What each piece does:
+
+- `--parent` records the stack edge plus a **fork point** (the parent
+  commit the layer was cut from) in `.wtp/worktree.toml`
+- `wtp restack` cascade-rebases layers onto their parents, replaying only
+  each layer's own commits
+- `wtp retarget` rewires an edge after the bottom of the stack lands
+- The parent can be **any ref**, not just another layer: point the bottom
+  layer at `origin/main` to track trunk, or retarget an orphaned layer at
+  `main` after its parent branch merged and was deleted
+
+Why one directory per layer beats switching branches in a single checkout
+(`git rebase --update-refs`, Graphite): while the bottom layer waits for
+review you keep working on upper layers, and when review feedback arrives
+you just `cd` down — no stashing, no context switching. Each layer can
+also host its own coding agent.
+
+The full stacked workflow (design and rationale):
+[`docs/design/stacked-worktree.md`](docs/design/stacked-worktree.md).
+wtp deliberately never touches the forge — no PR creation, no PR-base
+retargeting, no pushes. Pair it with `gh`/`glab` or your forge's CLI.
 
 ### Host Aliases
 
