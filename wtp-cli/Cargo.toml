@@ -1,6 +1,6 @@
 [package]
 name = "wtp"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["eddix <eli.tech.arm@gmail.com>"]
 description = "WorkTree for Polyrepo - Manage multiple git worktrees across repositories"
